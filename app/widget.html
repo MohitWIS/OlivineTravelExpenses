@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vendor Quotation Comparison</title>
+  <script src="https://js.zohostatic.com/creator/widgets/version/2.0/widgetsdk-min.js"></script>
+  <link rel="stylesheet" href="css/widget.css">
+</head>
+
+<body>
+
+  <!-- ============ HEADER ============ -->
+  <header class="hero">
+    <div class="hero-row">
+      <div class="hero-badge">
+        <svg viewBox="0 0 24 24">
+          <path
+            d="M21.5 15.5v-2l-8.5-5V3.25a1.5 1.5 0 0 0-3 0V8.5l-8.5 5v2l8.5-2.5v5.25L7.5 20v1.5l4.5-1 4.5 1V20L14 18.25V13l7.5 2.5z" />
+        </svg>
+      </div>
+      <div>
+        <h1>Vendor Quotation Comparison</h1>
+        <p>Air Travel Request Management &mdash; compare vendor fares, routes &amp; timings side by side</p>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn-refresh" id="btnRefresh" type="button">
+        <svg viewBox="0 0 24 24">
+          <path
+            d="M17.65 6.35A8 8 0 1 0 19.73 14h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" />
+        </svg>
+        Refresh
+      </button>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <!-- Loading / error / empty state (hidden once data arrives) -->
+    <div class="card" id="stateCard">
+      <div class="loader" id="loader">
+        <div class="spin"></div>
+        <p>Loading vendor quotations&hellip;</p>
+      </div>
+    </div>
+
+    <div id="content" style="display:none">
+
+      <!-- ============ TRAVEL REQUESTS ============ -->
+      <section class="card">
+        <div class="card-head">
+          <div class="card-title"><span class="dot"></span>Travel Requests</div>
+          <div class="card-sub">Requests awaiting action &mdash; showing only those with Open / Submitted quotations</div>
+        </div>
+        <div class="req-cards" id="reqCards"></div>
+        <div class="req-toolbar">
+          <div class="field" style="max-width:220px">
+            <label for="selStatus">Quote Status</label>
+            <select id="selStatus">
+              <option value="">All statuses</option>
+            </select>
+          </div>
+          <div class="meta-chips" id="reqMeta"></div>
+        </div>
+      </section>
+
+      <!-- ============ KPI TILES ============ -->
+      <section class="kpis" id="kpis"></section>
+
+      <!-- ============ FARE CHART ============ -->
+      <section class="card">
+        <div class="card-head">
+          <div class="card-title"><span class="dot"></span>Total Fare by Vendor</div>
+          <div class="card-sub">Quoted total amount per vendor &mdash; sorted lowest first</div>
+        </div>
+        <div class="chart-rows" id="chart"></div>
+        <div class="axis-note">
+          <span><span class="sw" style="background:var(--bar)"></span>Quoted total</span>
+          <span><span class="sw" style="background:var(--bar-best)"></span>Best (lowest) quote</span>
+        </div>
+      </section>
+
+      <!-- ============ COMPARISON TABLE ============ -->
+      <section class="card">
+        <div class="card-head">
+          <div class="card-title"><span class="dot"></span>Detailed Comparison</div>
+          <div class="card-sub">Every ticket option across all vendor quotations for this travel request</div>
+        </div>
+        <div class="tbl-scroll">
+          <table class="cmp">
+            <thead>
+              <tr>
+                <th>Vendor</th>
+                <th>Status</th>
+                <th>Leg</th>
+                <th>Route</th>
+                <th>Airline</th>
+                <th>Flight</th>
+                <th>Departure</th>
+                <th>Journey Time</th>
+                <th class="num">Fare</th>
+                <th class="num">Total</th>
+              </tr>
+            </thead>
+            <tbody id="tblBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ ROUTE FLOW ============ -->
+      <section class="card">
+        <div class="card-head">
+          <div class="card-title"><span class="dot"></span>Route &amp; Flight Flow</div>
+          <div class="card-sub">Journey per vendor &mdash; source &rarr; destination with airline &amp; flight options
+          </div>
+        </div>
+        <div id="flow"></div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- shared hover tooltip for the bar chart -->
+  <div class="tip" id="tip"></div>
+
+  <!-- ============ CUSTOM MODAL (replaces window.confirm / window.alert) ============ -->
+  <div class="modal-overlay" id="modal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-icon" id="modalIcon"></div>
+      <h3 class="modal-title" id="modalTitle"></h3>
+      <p class="modal-body" id="modalBody"></p>
+      <div class="modal-actions" id="modalActions"></div>
+    </div>
+  </div>
+
+  <script src="js/widget.js"></script>
+</body>
+
+</html>
