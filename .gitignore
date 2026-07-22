@@ -16,3 +16,6 @@ ZET-debug.log
 .DS_Store
 Thumbs.db
 .vscode/
+
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json
