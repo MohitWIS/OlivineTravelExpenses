@@ -968,6 +968,14 @@ table.cmp {
   font-weight: 700;
 }
 
+/* remarks can be long — let it wrap within a capped width */
+.cmp td.remarks {
+  white-space: normal;
+  min-width: 160px;
+  max-width: 260px;
+  color: var(--ink-2);
+}
+
 .cmp tr.row-best td {
   background: #fff9ec;
 }

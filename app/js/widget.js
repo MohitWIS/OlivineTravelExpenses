@@ -178,6 +178,9 @@ function normalise(rec) {
     travelDate: val(rec.Travel_Date),
     returnDate: val(rec.Return_Date),
     airline: val(rec.Airline_Name),
+    cabinBaggage: val(rec.Travel_Cabin_Baggage),
+    checkinBaggage: val(rec.Travel_Check_in_Baggage),
+    remarks: val(rec.Remarks),
     source: source,
     destination: destination,
     isLowest: val(rec.is_lowest).toLowerCase() === "true",
@@ -686,6 +689,10 @@ function renderTable(quotes, best) {
         "<td class='strong'>" + (i === 0 ? esc(q.vendor) : "") + "</td>" +
         "<td>" + (i === 0 && q.status ? '<span class="status-pill ' + statusClass(q.status) + '">' + esc(q.status) + "</span>" : "") +
         (i === 0 && showApprove ? '<button class="btn-approve" type="button" data-id="' + esc(q.id) + '">Approve</button>' : "") + "</td>" +
+        // baggage & remarks are quote-level — show once, on the first leg row
+        "<td>" + (i === 0 ? esc(q.cabinBaggage || "—") : "") + "</td>" +
+        "<td>" + (i === 0 ? esc(q.checkinBaggage || "—") : "") + "</td>" +
+        "<td class='remarks'>" + (i === 0 ? esc(q.remarks || "—") : "") + "</td>" +
         '<td><span class="dirtag ' + cls + '" style="margin-bottom:0">' + badge + "</span>" +
         (isVia ? ' <span class="via-tag">VIA</span>' : "") + "</td>" +
         "<td>" + esc(l.from.city || "—") + " &rarr; " + esc(l.at.city || "—") + "</td>" +
@@ -699,7 +706,7 @@ function renderTable(quotes, best) {
     });
   });
   body.innerHTML = rows.join("") ||
-    '<tr><td colspan="10" style="text-align:center;color:var(--ink-3)">No ticket options to display.</td></tr>';
+    '<tr><td colspan="13" style="text-align:center;color:var(--ink-3)">No ticket options to display.</td></tr>';
 }
 
 /* =====================================================================
