@@ -119,22 +119,53 @@ function splitPlace(s) {
    3. NORMALISE — raw record -> clean quotation object
 ===================================================================== */
 
-// Travel_Ticket_Options = outbound rows, SubForm2 = return rows
+// Travel_Ticket_Options = outbound rows, SubForm2 = return rows.
+// Each row carries its own From/At — >1 row in a direction means a connecting ("via") flight.
 function legsFrom(arr, dir) {
   return (Array.isArray(arr) ? arr : []).map(function (r) {
     return {
       dir: dir, // "out" | "ret"
+      from: splitPlace(r.From),   // segment origin
+      at: splitPlace(r.At),       // segment destination
       flightNo: val(r.Flight_Number),
       dep: val(r.Departure_Date),
       journey: val(r.Journey_Time1),
       fare: num(r.Fare)
     };
-  }).filter(function (l) { return l.flightNo || l.dep || l.fare; }); // one-way records carry a blank SubForm2 row
+    // keep only real rows (one-way records carry a blank SubForm2 row)
+  }).filter(function (l) { return l.from.city || l.at.city || l.flightNo || l.dep || l.fare; });
+}
+
+// group a quote's legs into travel directions (outbound, then return), order preserved
+function directions(q) {
+  var out = q.legs.filter(function (l) { return l.dir === "out"; });
+  var ret = q.legs.filter(function (l) { return l.dir === "ret"; });
+  var arr = [];
+  if (out.length) arr.push({ dir: "out", segs: out });
+  if (ret.length) arr.push({ dir: "ret", segs: ret });
+  return arr;
+}
+
+// overall from/to + intermediate "via" cities for a set of segments
+function dirSummary(segs) {
+  return {
+    from: segs[0].from,
+    to: segs[segs.length - 1].at,
+    via: segs.slice(0, -1).map(function (s) { return s.at.city; }).filter(Boolean)
+  };
 }
 
 function normalise(rec) {
   var tr = rec.travel_request || {};
   var legs = legsFrom(rec.Travel_Ticket_Options, "out").concat(legsFrom(rec.SubForm2, "ret"));
+
+  // overall request route: prefer the main record, else derive from the outbound segments
+  var source = splitPlace(rec.Source);
+  var destination = splitPlace(rec.Destination);
+  var outSegs = legs.filter(function (l) { return l.dir === "out"; });
+  if (!source.city && outSegs.length) source = outSegs[0].from;
+  if (!destination.city && outSegs.length) destination = outSegs[outSegs.length - 1].at;
+
   return {
     id: val(rec.ID),
     requestId: tr.Travel_Request_ID || val(rec.travel_request) || "(no travel request)",
@@ -147,8 +178,8 @@ function normalise(rec) {
     travelDate: val(rec.Travel_Date),
     returnDate: val(rec.Return_Date),
     airline: val(rec.Airline_Name),
-    source: splitPlace(rec.Source),
-    destination: splitPlace(rec.Destination),
+    source: source,
+    destination: destination,
     isLowest: val(rec.is_lowest).toLowerCase() === "true",
     legs: legs,
     total: num(rec.total_amount)
@@ -563,7 +594,32 @@ function renderChart(quotes, best) {
   function trow(k, v) { return '<div class="t-row"><span>' + k + "</span><span>" + v + "</span></div>"; }
 }
 
-/* --- route flow: one card per vendor, one row per leg (outbound/return) --- */
+// one flight segment row (from -> at, airline, flight, timing, fare)
+function legRow(l, airline, badge, cls) {
+  return '<div class="leg ' + cls + '">' +
+    '<div class="port"><div class="city">' + esc(l.from.city || "—") + '</div>' +
+    '<div class="country">' + esc(l.from.country) + '</div>' +
+    '<div class="dt">' + esc(l.dep || "—") + "</div></div>" +
+
+    '<div class="conn">' +
+    '<span class="dirtag ' + cls + '">' + badge + "</span>" +
+    '<div class="airline">' + esc(airline || "—") + '</div>' +
+    '<div class="fno">' + esc(l.flightNo) + '</div>' +
+    '<div class="path"><span class="pt"></span><span class="ln"></span>' +
+    '<svg viewBox="0 0 24 24"><path d="M21.5 15.5v-2l-8.5-5V3.25a1.5 1.5 0 0 0-3 0V8.5l-8.5 5v2l8.5-2.5v5.25L7.5 20v1.5l4.5-1 4.5 1V20L14 18.25V13l7.5 2.5z"/></svg>' +
+    '<span class="ln"></span><span class="pt"></span></div>' +
+    (l.journey ? '<span class="dur">' + esc(l.journey) + "</span>" : "") +
+    "</div>" +
+
+    '<div class="port to"><div class="city">' + esc(l.at.city || "—") + '</div>' +
+    '<div class="country">' + esc(l.at.country) + '</div>' +
+    "</div>" +
+
+    '<div class="leg-fare"><small>Fare</small>' + CURRENCY.format(l.fare) + "</div>" +
+    "</div>";
+}
+
+/* --- route flow: one card per vendor; each direction may be a direct or "via" flight --- */
 function renderFlow(quotes, best) {
   var el = document.getElementById("flow");
   if (!quotes.length) { el.innerHTML = ""; return; }
@@ -571,31 +627,24 @@ function renderFlow(quotes, best) {
   el.innerHTML = quotes.map(function (q) {
     var isBest = best && q.id === best.id;
 
-    var legsHtml = q.legs.map(function (l) {
-      var isRet = l.dir === "ret";
-      var from = isRet ? q.destination : q.source;  // return legs run backwards
-      var to = isRet ? q.source : q.destination;
-      return '<div class="leg ' + (isRet ? "ret" : "out") + '">' +
-        '<div class="port"><div class="city">' + esc(from.city || "—") + '</div>' +
-        '<div class="country">' + esc(from.country) + '</div>' +
-        '<div class="dt">' + esc(l.dep || "—") + "</div></div>" +
+    var legsHtml = directions(q).map(function (d) {
+      var cls = d.dir === "ret" ? "ret" : "out";
+      var badge = d.dir === "ret" ? "RETURN" : "OUTBOUND";
 
-        '<div class="conn">' +
-        '<span class="dirtag ' + (isRet ? "ret" : "out") + '">' + (isRet ? "RETURN" : "OUTBOUND") + "</span>" +
-        '<div class="airline">' + esc(q.airline || "—") + '</div>' +
-        '<div class="fno">' + esc(l.flightNo) + '</div>' +
-        '<div class="path"><span class="pt"></span><span class="ln"></span>' +
-        '<svg viewBox="0 0 24 24"><path d="M21.5 15.5v-2l-8.5-5V3.25a1.5 1.5 0 0 0-3 0V8.5l-8.5 5v2l8.5-2.5v5.25L7.5 20v1.5l4.5-1 4.5 1V20L14 18.25V13l7.5 2.5z"/></svg>' +
-        '<span class="ln"></span><span class="pt"></span></div>' +
-        (l.journey ? '<span class="dur">' + esc(l.journey) + "</span>" : "") +
-        "</div>" +
+      // direct flight — single segment row
+      if (d.segs.length <= 1) return legRow(d.segs[0], q.airline, badge, cls);
 
-        '<div class="port to"><div class="city">' + esc(to.city || "—") + '</div>' +
-        '<div class="country">' + esc(to.country) + '</div>' +
-        "</div>" +
-
-        '<div class="leg-fare"><small>Fare</small>' + CURRENCY.format(l.fare) + "</div>" +
+      // connecting ("via") flight — header with overall route + via, then each segment
+      var s = dirSummary(d.segs);
+      var head = '<div class="dir-head">' +
+        '<span class="dirtag ' + cls + '">' + badge + "</span>" +
+        '<span class="dir-route">' + esc(s.from.city || "—") + '<span class="rc-arrow">&rarr;</span>' + esc(s.to.city || "—") + "</span>" +
+        (s.via.length ? '<span class="via-note">via ' + esc(s.via.join(", ")) + "</span>" : "") +
         "</div>";
+      var segs = d.segs.map(function (seg, i) {
+        return legRow(seg, q.airline, "LEG " + (i + 1), cls);
+      }).join("");
+      return '<div class="dir-group">' + head + '<div class="dir-segs">' + segs + "</div></div>";
     }).join("");
 
     return '<div class="quote-block' + (isBest ? " is-best" : "") + '">' +
@@ -621,17 +670,25 @@ function renderTable(quotes, best) {
     var isBest = best && q.id === best.id;
     // Approve button visibility is decided by canApprove() (status + finance role)
     var showApprove = canApprove(q);
-    var legs = q.legs.length ? q.legs : [{ dir: "out", flightNo: "—", dep: "", journey: "", fare: 0 }];
+    var blank = { city: "", country: "" };
+    var legs = q.legs.length ? q.legs : [{ dir: "out", from: blank, at: blank, flightNo: "—", dep: "", journey: "", fare: 0 }];
+    // count segments per direction so we can flag connecting ("via") flights
+    var dirCounts = { out: 0, ret: 0 };
+    legs.forEach(function (l) { dirCounts[l.dir] = (dirCounts[l.dir] || 0) + 1; });
+    var seen = { out: 0, ret: 0 };
     legs.forEach(function (l, i) {
       var isRet = l.dir === "ret";
-      var from = isRet ? q.destination : q.source;
-      var to = isRet ? q.source : q.destination;
+      var cls = isRet ? "ret" : "out";
+      var isVia = dirCounts[l.dir] > 1;
+      var segNo = ++seen[l.dir];
+      var badge = (isRet ? "RETURN" : "OUTBOUND") + (isVia ? " " + segNo : "");
       rows.push('<tr class="' + (isBest ? "row-best" : "") + '">' +
         "<td class='strong'>" + (i === 0 ? esc(q.vendor) : "") + "</td>" +
         "<td>" + (i === 0 && q.status ? '<span class="status-pill ' + statusClass(q.status) + '">' + esc(q.status) + "</span>" : "") +
         (i === 0 && showApprove ? '<button class="btn-approve" type="button" data-id="' + esc(q.id) + '">Approve</button>' : "") + "</td>" +
-        '<td><span class="dirtag ' + (isRet ? "ret" : "out") + '" style="margin-bottom:0">' + (isRet ? "RETURN" : "OUTBOUND") + "</span></td>" +
-        "<td>" + esc(from.city) + " &rarr; " + esc(to.city) + "</td>" +
+        '<td><span class="dirtag ' + cls + '" style="margin-bottom:0">' + badge + "</span>" +
+        (isVia ? ' <span class="via-tag">VIA</span>' : "") + "</td>" +
+        "<td>" + esc(l.from.city || "—") + " &rarr; " + esc(l.at.city || "—") + "</td>" +
         "<td>" + esc(q.airline) + "</td>" +
         "<td>" + esc(l.flightNo) + "</td>" +
         "<td>" + esc(l.dep || "—") + "</td>" +
