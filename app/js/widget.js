@@ -408,10 +408,10 @@ function showAlert(opts) {
                           (or approved/rejected), their buttons disappear.
    - Nobody once the request already has an Approved quote.
 
-   Actions:
-   - LOWEST quote            -> Approved, all others Rejected.
-   - NON-lowest, travel desk -> Approval Pending by Finance Team, others Open.
-   - NON-lowest / pending, finance -> final approval: Approved, others Rejected.
+   Actions (lowest and non-lowest behave the same now):
+   - Travel desk approves any quote -> Approval Pending by Finance Team,
+                                       all others Open.
+   - Finance approves (fresh or pending) -> final: Approved, others Rejected.
 ===================================================================== */
 
 // quote already sent to finance — only a finance user can finalise it
@@ -469,10 +469,9 @@ function approveQuote(id) {
 
   var group = groupOf(q.requestId);
   var others = group.filter(function (g) { return g.id !== q.id; });
-  var minTotal = Math.min.apply(null, group.map(function (g) { return g.total; }));
-  // Final approval when it's the lowest quote, or a finance user is approving
-  // (finance can approve a higher-than-lowest / pending quote outright).
-  var isFinal = q.total <= minTotal || isFinanceUser;
+  // Only a finance user finalises a quote. Everyone else (incl. picking the
+  // lowest quote) routes it to finance for approval.
+  var isFinal = isFinanceUser;
 
   var dialog = isFinal
     ? {
@@ -482,9 +481,9 @@ function approveQuote(id) {
       confirmText: "Approve"
     }
     : {
-      icon: "warn",
-      title: "Not the lowest quote",
-      body: q.vendor + " at " + CURRENCY.format(q.total) + " is not the lowest quote.\n\nIt will be sent for finance approval (Approval Pending by Finance Team) and the other quotations will be set to Open.",
+      icon: "brand",
+      title: "Send for finance approval?",
+      body: "Approve " + q.vendor + " at " + CURRENCY.format(q.total) + ".\n\nThis quotation will be sent for finance approval (Approval Pending by Finance Team) and the other quotations will be set to Open.",
       confirmText: "Send to finance"
     };
 
@@ -674,6 +673,7 @@ function renderTable(quotes, best) {
     var isBest = best && q.id === best.id;
     // Approve button visibility is decided by canApprove() (status + finance role)
     var showApprove = canApprove(q);
+    var approveCls = "btn-approve" + (qi === 0 ? " green" : ""); // first (lowest-total) row -> green
     var blank = { city: "", country: "" };
     var legs = q.legs.length ? q.legs : [{ dir: "out", from: blank, at: blank, flightNo: "—", dep: "", arr: "", journey: "", layover: "", fare: 0 }];
     // count segments per direction so we can flag connecting ("via") flights
@@ -691,7 +691,7 @@ function renderTable(quotes, best) {
       rows.push('<tr class="' + (isBest ? "row-best" : "") + '">' +
         "<td class='strong'>" + (i === 0 ? esc(q.vendor) : "") + "</td>" +
         "<td>" + (i === 0 && q.status ? '<span class="status-pill ' + statusClass(q.status) + '">' + esc(q.status) + "</span>" : "") +
-        (i === 0 && showApprove ? '<button class="btn-approve" type="button" data-id="' + esc(q.id) + '">Approve</button>' : "") + "</td>" +
+        (i === 0 && showApprove ? '<button class="' + approveCls + '" type="button" data-id="' + esc(q.id) + '">Approve</button>' : "") + "</td>" +
         '<td><span class="dirtag ' + cls + '" style="margin-bottom:0">' + badge + "</span>" +
         (isVia ? ' <span class="via-tag">VIA</span>' : "") + "</td>" +
         "<td>" + esc(l.dep || "—") + "</td>" +

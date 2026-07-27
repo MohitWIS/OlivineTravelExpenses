@@ -885,8 +885,8 @@ body {
 .btn-approve {
   border: 0;
   cursor: pointer;
-  background: var(--good);
-  color: #fff;
+  background: var(--ink);
+  color: var(--brand);
   font: inherit;
   font-size: 11px;
   font-weight: 800;
@@ -899,6 +899,16 @@ body {
 
 .btn-approve:hover {
   transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(24, 24, 27, .25);
+}
+
+/* green Approve on the first (top / lowest-total) row only */
+.btn-approve.green {
+  background: var(--good);
+  color: #fff;
+}
+
+.btn-approve.green:hover {
   background: #12692f;
   box-shadow: 0 4px 10px rgba(21, 128, 61, .3);
 }
