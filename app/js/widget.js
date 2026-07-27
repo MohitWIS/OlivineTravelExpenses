@@ -129,7 +129,9 @@ function legsFrom(arr, dir) {
       at: splitPlace(r.At),       // segment destination
       flightNo: val(r.Flight_Number),
       dep: val(r.Departure_Date),
+      arr: val(r.Arrival_Date_Time) || val(r.Arrival_Time) || val(r.Arrival_Date),
       journey: val(r.Journey_Time1),
+      layover: val(r.Layover_Time),
       fare: num(r.Fare)
     };
     // keep only real rows (one-way records carry a blank SubForm2 row)
@@ -669,12 +671,14 @@ function renderFlow(quotes, best) {
 function renderTable(quotes, best) {
   var body = document.getElementById("tblBody");
   var rows = [];
-  quotes.forEach(function (q) {
+  // quotes arrive sorted by total ascending (see currentQuotes) — first quote is the lowest
+  quotes.forEach(function (q, qi) {
     var isBest = best && q.id === best.id;
     // Approve button visibility is decided by canApprove() (status + finance role)
     var showApprove = canApprove(q);
+    var approveCls = "btn-approve" + (qi === 0 ? " green" : ""); // top (lowest-total) row -> green
     var blank = { city: "", country: "" };
-    var legs = q.legs.length ? q.legs : [{ dir: "out", from: blank, at: blank, flightNo: "—", dep: "", journey: "", fare: 0 }];
+    var legs = q.legs.length ? q.legs : [{ dir: "out", from: blank, at: blank, flightNo: "—", dep: "", arr: "", journey: "", layover: "", fare: 0 }];
     // count segments per direction so we can flag connecting ("via") flights
     var dirCounts = { out: 0, ret: 0 };
     legs.forEach(function (l) { dirCounts[l.dir] = (dirCounts[l.dir] || 0) + 1; });
@@ -685,28 +689,31 @@ function renderTable(quotes, best) {
       var isVia = dirCounts[l.dir] > 1;
       var segNo = ++seen[l.dir];
       var badge = (isRet ? "RETURN" : "OUTBOUND") + (isVia ? " " + segNo : "");
+      // Column order: Vendor | Status | Leg | Departure | Arrival | Route | Total |
+      //               Airline | Flight | Journey | Layover | Cabin | Check-in | Remarks
       rows.push('<tr class="' + (isBest ? "row-best" : "") + '">' +
         "<td class='strong'>" + (i === 0 ? esc(q.vendor) : "") + "</td>" +
         "<td>" + (i === 0 && q.status ? '<span class="status-pill ' + statusClass(q.status) + '">' + esc(q.status) + "</span>" : "") +
-        (i === 0 && showApprove ? '<button class="btn-approve" type="button" data-id="' + esc(q.id) + '">Approve</button>' : "") + "</td>" +
+        (i === 0 && showApprove ? '<button class="' + approveCls + '" type="button" data-id="' + esc(q.id) + '">Approve</button>' : "") + "</td>" +
+        '<td><span class="dirtag ' + cls + '" style="margin-bottom:0">' + badge + "</span>" +
+        (isVia ? ' <span class="via-tag">VIA</span>' : "") + "</td>" +
+        "<td>" + esc(l.dep || "—") + "</td>" +
+        "<td>" + esc(l.arr || "—") + "</td>" +
+        "<td>" + esc(l.from.city || "—") + " &rarr; " + esc(l.at.city || "—") + "</td>" +
+        "<td class='num strong'>" + (i === 0 ? CURRENCY.format(q.total) : "") + "</td>" +
+        "<td>" + esc(q.airline) + "</td>" +
+        "<td>" + esc(l.flightNo) + "</td>" +
+        "<td>" + esc(l.journey || "—") + "</td>" +
+        "<td>" + esc(l.layover || "—") + "</td>" +
         // baggage & remarks are quote-level — show once, on the first leg row
         "<td>" + (i === 0 ? esc(q.cabinBaggage || "—") : "") + "</td>" +
         "<td>" + (i === 0 ? esc(q.checkinBaggage || "—") : "") + "</td>" +
         "<td class='remarks'>" + (i === 0 ? esc(q.remarks || "—") : "") + "</td>" +
-        '<td><span class="dirtag ' + cls + '" style="margin-bottom:0">' + badge + "</span>" +
-        (isVia ? ' <span class="via-tag">VIA</span>' : "") + "</td>" +
-        "<td>" + esc(l.from.city || "—") + " &rarr; " + esc(l.at.city || "—") + "</td>" +
-        "<td>" + esc(q.airline) + "</td>" +
-        "<td>" + esc(l.flightNo) + "</td>" +
-        "<td>" + esc(l.dep || "—") + "</td>" +
-        "<td>" + esc(l.journey || "—") + "</td>" +
-        "<td class='num'>" + CURRENCY.format(l.fare) + "</td>" +
-        "<td class='num strong'>" + (i === 0 ? CURRENCY.format(q.total) : "") + "</td>" +
         "</tr>");
     });
   });
   body.innerHTML = rows.join("") ||
-    '<tr><td colspan="13" style="text-align:center;color:var(--ink-3)">No ticket options to display.</td></tr>';
+    '<tr><td colspan="14" style="text-align:center;color:var(--ink-3)">No ticket options to display.</td></tr>';
 }
 
 /* =====================================================================
