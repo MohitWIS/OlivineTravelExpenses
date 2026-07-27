@@ -619,8 +619,6 @@ function legRow(l, airline, badge, cls) {
     '<div class="port to"><div class="city">' + esc(l.at.city || "—") + '</div>' +
     '<div class="country">' + esc(l.at.country) + '</div>' +
     "</div>" +
-
-    '<div class="leg-fare"><small>Fare</small>' + CURRENCY.format(l.fare) + "</div>" +
     "</div>";
 }
 
@@ -676,7 +674,6 @@ function renderTable(quotes, best) {
     var isBest = best && q.id === best.id;
     // Approve button visibility is decided by canApprove() (status + finance role)
     var showApprove = canApprove(q);
-    var approveCls = "btn-approve" + (qi === 0 ? " green" : ""); // top (lowest-total) row -> green
     var blank = { city: "", country: "" };
     var legs = q.legs.length ? q.legs : [{ dir: "out", from: blank, at: blank, flightNo: "—", dep: "", arr: "", journey: "", layover: "", fare: 0 }];
     // count segments per direction so we can flag connecting ("via") flights
@@ -694,7 +691,7 @@ function renderTable(quotes, best) {
       rows.push('<tr class="' + (isBest ? "row-best" : "") + '">' +
         "<td class='strong'>" + (i === 0 ? esc(q.vendor) : "") + "</td>" +
         "<td>" + (i === 0 && q.status ? '<span class="status-pill ' + statusClass(q.status) + '">' + esc(q.status) + "</span>" : "") +
-        (i === 0 && showApprove ? '<button class="' + approveCls + '" type="button" data-id="' + esc(q.id) + '">Approve</button>' : "") + "</td>" +
+        (i === 0 && showApprove ? '<button class="btn-approve" type="button" data-id="' + esc(q.id) + '">Approve</button>' : "") + "</td>" +
         '<td><span class="dirtag ' + cls + '" style="margin-bottom:0">' + badge + "</span>" +
         (isVia ? ' <span class="via-tag">VIA</span>' : "") + "</td>" +
         "<td>" + esc(l.dep || "—") + "</td>" +

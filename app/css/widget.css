@@ -686,7 +686,7 @@ body {
 /* one row per flight leg: from | connector | to | fare */
 .leg {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(170px, 1.4fr) minmax(120px, 1fr) auto;
+  grid-template-columns: minmax(120px, 1fr) minmax(200px, 1.6fr) minmax(120px, 1fr);
   gap: 10px;
   align-items: center;
   background: var(--surface);
@@ -885,8 +885,8 @@ body {
 .btn-approve {
   border: 0;
   cursor: pointer;
-  background: var(--ink);
-  color: var(--brand);
+  background: var(--good);
+  color: #fff;
   font: inherit;
   font-size: 11px;
   font-weight: 800;
@@ -899,7 +899,8 @@ body {
 
 .btn-approve:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 10px rgba(24, 24, 27, .25);
+  background: #12692f;
+  box-shadow: 0 4px 10px rgba(21, 128, 61, .3);
 }
 
 .btn-approve:disabled {
@@ -907,16 +908,6 @@ body {
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
-}
-
-/* green Approve on the top (lowest-total) row */
-.btn-approve.green {
-  background: var(--good);
-  color: #fff;
-}
-
-.btn-approve.green:hover {
-  background: #12692f;
 }
 
 /* ---------- 8. Comparison table ---------- */
