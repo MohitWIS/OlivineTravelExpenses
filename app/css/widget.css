@@ -117,6 +117,21 @@ body {
   letter-spacing: -.02em;
 }
 
+/* "View only" badge in the header (view.html) */
+.view-badge {
+  display: inline-block;
+  vertical-align: 3px;
+  margin-left: 8px;
+  background: var(--ink);
+  color: var(--brand);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
 .hero p {
   font-size: 13px;
   color: rgba(24, 24, 27, .72);
@@ -355,6 +370,94 @@ body {
   font-weight: 600;
 }
 
+/* passenger block on a request card (sits under the request number) */
+.req-card .rc-pax {
+  margin-top: 9px;
+  background: rgba(24, 24, 27, .035);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 7px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.req-card.active .rc-pax {
+  background: rgba(255, 255, 255, .55);
+  border-color: rgba(24, 24, 27, .12);
+}
+.req-card .pax-hd {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--ink-3);
+}
+.req-card .pax-hd svg { width: 12px; height: 12px; fill: var(--ink-3); flex: none; }
+.req-card .pax-ct {
+  margin-left: auto;
+  background: var(--ink);
+  color: var(--brand);
+  border-radius: 999px;
+  min-width: 16px;
+  padding: 0 5px;
+  font-size: 9.5px;
+  line-height: 16px;
+  text-align: center;
+}
+.req-card .pax {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.req-card .pax-av {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--brand);
+  font-size: 10px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.req-card .pax-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.req-card .pax-age {
+  flex: none;
+  background: #fff;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+}
+/* infant (age <= 5) sign */
+.req-card .pax-infant {
+  flex: none;
+  background: var(--ink);
+  color: var(--brand);
+  border-radius: 999px;
+  padding: 1px 7px 1px 5px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: .02em;
+}
+.req-card .pax.is-infant .pax-av { background: var(--brand); color: var(--ink); box-shadow: 0 0 0 2px var(--ink); }
+
 .req-card .rc-foot {
   margin-top: 11px;
   padding-top: 9px;
@@ -402,6 +505,23 @@ body {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--line);
+}
+
+/* top Quote Status filter bar (drives which travel requests show) */
+.statusbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.statusbar .field { max-width: 240px; margin: 0; }
+.statusbar-note {
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.4;
+  padding-bottom: 9px;
+  flex: 1;
+  min-width: 200px;
 }
 
 /* ---------- 5. KPI tiles ---------- */
@@ -993,6 +1113,180 @@ table.cmp {
 
 .cmp tr.row-best td:first-child {
   box-shadow: inset 3px 0 0 var(--bar-best);
+}
+
+/* ---------- 8b. Sort bar + compact comparison table ---------- */
+.cmp-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.sort-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sort-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--ink-3);
+}
+
+.sort-btn {
+  border: 1.5px solid var(--line);
+  background: #fff;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  padding: 7px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+
+.sort-btn:hover { border-color: var(--brand-dark); }
+
+.sort-btn.active {
+  background: var(--brand);
+  border-color: var(--brand-dark);
+  color: var(--ink);
+}
+
+/* compact table: one row per vendor, wraps instead of scrolling sideways */
+.cmp.compact {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.cmp.compact td {
+  white-space: normal;
+  vertical-align: top;
+}
+
+/* column widths that add up to 100% (no horizontal scroll) */
+.cmp.compact th:nth-child(1), .cmp.compact td:nth-child(1) { width: 10%; }  /* Airline */
+.cmp.compact th:nth-child(2), .cmp.compact td:nth-child(2) { width: 11%; }  /* Flight Number */
+.cmp.compact th:nth-child(3), .cmp.compact td:nth-child(3) { width: 9%; }   /* Status */
+.cmp.compact th:nth-child(4), .cmp.compact td:nth-child(4) { width: 22%; }  /* Journey */
+.cmp.compact th:nth-child(5), .cmp.compact td:nth-child(5) { width: 8%; }   /* Travel Time */
+.cmp.compact th:nth-child(6), .cmp.compact td:nth-child(6) { width: 8%; }   /* Layover */
+.cmp.compact th:nth-child(7), .cmp.compact td:nth-child(7) { width: 10%; }  /* Baggage */
+.cmp.compact th:nth-child(8), .cmp.compact td:nth-child(8) { width: 10%; }  /* Remarks */
+.cmp.compact th:nth-child(9), .cmp.compact td:nth-child(9) { width: 12%; }  /* Vendor & Fare */
+
+.cmp.compact td.dur-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* flight numbers per direction */
+.cell-fn { font-size: 12px; }
+.cell-fn .fn-line { padding: 2px 0; font-variant-numeric: tabular-nums; }
+.cell-fn .fn-line .dirtag { margin-right: 5px; }
+
+/* Vendor + Fare single cell */
+.cell-vf .vf-vendor { font-weight: 700; font-size: 13px; }
+.cell-vf .vf-fare {
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  margin: 2px 0 6px;
+}
+.cell-vf .btn-approve { margin-left: 0; }
+
+/* Journey cell — one line per direction */
+.cell-journey { font-size: 12px; }
+.cell-journey .jl { padding: 3px 0; }
+.cell-journey .jl + .jl { border-top: 1px dashed var(--line); margin-top: 3px; }
+.jl-route { font-weight: 700; margin: 0 6px; }
+.jl-meta { color: var(--ink-2); }
+.jl-times { display: block; color: var(--ink-3); font-variant-numeric: tabular-nums; margin-top: 1px; }
+
+/* recommendation banner (infant on board -> shortest trip) */
+.rec-note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 4px 0 12px;
+  padding: 9px 13px;
+  background: var(--brand-soft);
+  border: 1px solid var(--brand);
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.rec-note .rec-ic { font-size: 17px; line-height: 1; }
+
+/* the recommended (shortest) flight in the comparison grid */
+.rec-tag {
+  display: inline-block;
+  background: var(--good);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  margin-bottom: 5px;
+}
+.cmp.grid tr.rec-row td:first-child { box-shadow: inset 3px 0 0 var(--good); }
+
+/* ---------- 8c. Flight-by-vendor comparison grid ---------- */
+/* fixed layout + %-widths (set per-column in JS) so it always fits — no horizontal scroll */
+.cmp.grid { min-width: 0; width: 100%; table-layout: fixed; }
+.cmp.grid th,
+.cmp.grid td {
+  vertical-align: top;
+  white-space: normal;          /* let long names wrap instead of widening the table */
+  padding: 10px 10px;
+}
+.cmp.grid th { overflow-wrap: normal; word-break: normal; }   /* don't split header words mid-letter */
+.cmp.grid td.cell-fn { overflow-wrap: anywhere; }             /* long flight numbers may break */
+.cmp.grid td.dur-cell { white-space: nowrap; }
+.cmp.grid td .dirtag { margin-bottom: 4px; }
+/* dashed divider between a flight's OUTBOUND and RETURN rows (solid line separates flights) */
+.cmp.grid tr.dir-mid td:not(.vcell) { border-bottom-style: dashed; }
+
+/* vendor columns — fares side by side */
+.cmp.grid .vhead { text-align: center; }
+.cmp.grid .vcell {
+  text-align: center;
+  vertical-align: middle;
+  border-left: 1px solid var(--line);
+  white-space: normal;
+}
+.cmp.grid .vcell.empty { color: var(--ink-3); }
+.vc-fare {
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 5px;
+}
+.vcell .status-pill { margin-bottom: 6px; }
+.vcell .btn-approve { margin-top: 2px; }
+
+/* cheapest vendor in the row — brand highlight (like the mockup) */
+.cmp.grid .vcell.vbest {
+  background: var(--brand-soft);
+  box-shadow: inset 0 0 0 2px var(--brand);
+}
+.cmp tbody tr:hover .vcell.vbest { background: var(--brand-soft); }
+.vbest-tag {
+  display: inline-block;
+  background: var(--brand);
+  color: var(--ink);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  margin-bottom: 5px;
 }
 
 /* ---------- 9. Tooltip (bar chart hover) ---------- */

@@ -47,21 +47,27 @@
 
     <div id="content" style="display:none">
 
+      <!-- ============ QUOTE STATUS FILTER (top of everything) ============ -->
+      <section class="card statusbar">
+        <div class="field">
+          <label for="selStatus">Quote Status</label>
+          <select id="selStatus">
+            <option value="">All statuses</option>
+          </select>
+        </div>
+        <div class="statusbar-note">Filters the travel requests below &mdash; pick <b>Approved</b> to review requests
+          that are already approved</div>
+      </section>
+
       <!-- ============ TRAVEL REQUESTS ============ -->
       <section class="card">
         <div class="card-head">
           <div class="card-title"><span class="dot"></span>Travel Requests</div>
-          <div class="card-sub">Requests awaiting action &mdash; showing only those with Open / Submitted quotations
-          </div>
+          <div class="card-sub" id="reqSub">Requests awaiting action &mdash; showing only those with Open / Submitted
+            quotations</div>
         </div>
         <div class="req-cards" id="reqCards"></div>
         <div class="req-toolbar">
-          <div class="field" style="max-width:220px">
-            <label for="selStatus">Quote Status</label>
-            <select id="selStatus">
-              <option value="">All statuses</option>
-            </select>
-          </div>
           <div class="meta-chips" id="reqMeta"></div>
         </div>
       </section>
@@ -84,30 +90,21 @@
 
       <!-- ============ COMPARISON TABLE ============ -->
       <section class="card">
-        <div class="card-head">
-          <div class="card-title"><span class="dot"></span>Detailed Comparison</div>
-          <div class="card-sub">Every ticket option across all vendor quotations for this travel request</div>
+        <div class="card-head cmp-head">
+          <div>
+            <div class="card-title"><span class="dot"></span>Detailed Comparison</div>
+            <div class="card-sub">One row per flight &mdash; vendor fares side by side, the cheapest highlighted</div>
+          </div>
+          <div class="sort-bar" id="sortBar">
+            <span class="sort-label">Sort by</span>
+            <button class="sort-btn active" type="button" data-sort="lowest">💲 Lowest fare</button>
+            <button class="sort-btn" type="button" data-sort="fastest">⚡ Fastest</button>
+          </div>
         </div>
+        <div class="rec-note" id="recNote" style="display:none"></div>
         <div class="tbl-scroll">
-          <table class="cmp">
-            <thead>
-              <tr>
-                <th>Vendor</th>
-                <th>Status</th>
-                <th>Leg</th>
-                <th>Departure Time</th>
-                <th>Arrival Time</th>
-                <th>Route</th>
-                <th class="num">Total</th>
-                <th>Airline</th>
-                <th>Flight Number</th>
-                <th>Journey Time</th>
-                <th>Layover Time</th>
-                <th>Cabin Baggage</th>
-                <th>Check-in Baggage</th>
-                <th>Remarks</th>
-              </tr>
-            </thead>
+          <table class="cmp grid">
+            <thead id="tblHead"></thead>
             <tbody id="tblBody"></tbody>
           </table>
         </div>
