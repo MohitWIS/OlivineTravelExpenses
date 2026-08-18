@@ -20,7 +20,17 @@
 // Department report matches the login and their Department_Name is Finance & Accounts.
 var loggedInUser = null;
 var isFinanceUser = false;
+var isDirectorUser = false;                 // Director — approves > $1000 quotes
+var directorFromDept = false;               // …says DuplicateDepartment (Department_Name = Director)
+var directorFromMaster = false;             // …says Department_Master (may be unreadable → stays false)
 var FINANCE_DEPT = "Finance & Accounts";
+var DIRECTOR_THRESHOLD = 1000;              // quotes ABOVE this need Director approval after Finance
+
+// Director if EITHER source says so — Department_Master is often permission-restricted
+// (403), so DuplicateDepartment is the primary source in practice.
+function recomputeDirector() {
+  isDirectorUser = directorFromDept || directorFromMaster;
+}
 
 // normalise a department/email for comparison: lowercase, collapse spaces,
 // treat "&" and "and" the same ("Finance & Accounts" == "finance and accounts")
@@ -33,7 +43,9 @@ ZOHO.CREATOR.UTIL.getInitParams().then(function (response) {
   // login email can arrive under a few different keys depending on SDK/version
   loggedInUser = norm(response.loginUser || response.loginEmailId || response.loginEmail || response.userEmail || "");
   getDepartment(); // work out the user's role (Finance & Accounts or not)
+  getDirector();   // is the user a Director? (Department_Master) — approves > $1000 quotes
   getPassengers(); // passenger names per travel request (for the request cards)
+  getMyRequests(); // view-only page: restrict to requests raised by / for this person
   GetRecords();    // load the quotations
 });
 
@@ -41,14 +53,79 @@ ZOHO.CREATOR.UTIL.getInitParams().then(function (response) {
 // `Passenger_Details` (fields Passenger_Name, Age). Keyed by the request number.
 var passengersByRequest = {};
 
+// VIEW-ONLY page: the set of request numbers this person may see — those where their
+// login matches the Raiser_Email or HOD_Email in report Travel_Request_Report_for_Employee.
+// null = not loaded yet (view page shows nothing until it resolves). Unused by the main widget.
+var allowedRequests = null;
+
+// does any email field on a record match the logged-in user? (Raiser_Email / HOD_Email
+// / any *email* field) — used to decide which requests a view-only user may see
+function recordMatchesUser(r) {
+  if (norm(r.Raiser_Email) === loggedInUser || norm(r.HOD_Email) === loggedInUser) return true;
+  for (var k in r) {
+    if (r.hasOwnProperty(k) && /email/i.test(k) && norm(r[k]) === loggedInUser) return true;
+  }
+  return false;
+}
+
+function getRecordsFrom(report) {
+  return ZOHO.CREATOR.DATA.getRecords({
+    app_name: "air-travel-request-management",
+    report_name: report,
+    max_records: 1000,
+    field_config: "all",
+  }).then(function (response) { return response.data || []; },
+    function (err) { console.warn("ATRM widget: lookup failed for " + report, err); return []; });
+}
+
+function getMyRequests() {
+  if (!VIEW_ONLY) return; // this whole feature is view.html-only; widget.html is unaffected
+  var set = {};
+
+  // Report 1 — Travel_Request_Report_for_Employee: scoping only (Raiser/HOD email match)
+  var pEmp = getRecordsFrom("Travel_Request_Report_for_Employee").then(function (rows) {
+    rows.forEach(function (r) {
+      if (recordMatchesUser(r)) { var n = findRequestNo(r); if (n) set[reqKey(n)] = true; }
+    });
+  });
+
+  // Report 2 — HOD_Request_Approval_for_HOD: the logged-in HOD's own approval queue
+  // (server-side filtered to them), so ACCESS to it is the permission — authorize every
+  // request it returns, no email check. It's request-level, so only rows that actually
+  // carry quotation data are merged as a data source (avoids empty junk quotes).
+  var pHod = getRecordsFrom("HOD_Request_Approval_for_HOD").then(function (rows) {
+    rows.forEach(function (r) { var n = findRequestNo(r); if (n) set[reqKey(n)] = true; });
+    hodRecords = rows.filter(function (r) {
+      return val(r.Service_Provider_Name) || num(r.total_amount) ||
+        (Array.isArray(r.Travel_Ticket_Options) && r.Travel_Ticket_Options.length);
+    });
+  });
+
+  Promise.all([pEmp, pHod]).then(function () {
+    allowedRequests = set; // fail closed: empty set shows nothing rather than everyone's
+    console.log("ATRM view-only: allowed requests for", loggedInUser, "→", Object.keys(set),
+      "| HOD data records:", hodRecords.length);
+    finish();  // re-merge now that HOD data + the allowed set are ready
+  });
+}
+
+// may this request be shown? Main widget: always. View page: only the person's own.
+function allowedRequest(requestId) {
+  if (!VIEW_ONLY) return true;
+  if (!allowedRequests) return false;   // not loaded yet — show nothing
+  return !!allowedRequests[reqKey(requestId)];
+}
+
 // normalise a request number so "Req-0002" / "req 0002" / " REQ-0002 " all match
 function reqKey(s) { return val(s).toLowerCase().replace(/[\s-]/g, ""); }
 
-// find the "Req-XXXX" request number on a travel_request_Report record — try the
-// usual field names, else scan every field for a Req-looking value
+// find the "Req-XXXX" request number on a record — handle a flat field, a nested
+// travel_request.Travel_Request_ID, or a lookup object; else scan every field.
 function findRequestNo(r) {
-  var direct = val(r.Travel_Request_ID) || val(r.travel_request) || val(r.Request_ID) ||
-    val(r.Travel_Request) || val(r.Name);
+  var tr = r.travel_request;
+  var nested = (tr && typeof tr === "object") ? val(tr.Travel_Request_ID) : ""; // quotation shape
+  var direct = val(r.Travel_Request_ID) || nested || val(r.travel_request) ||
+    val(r.Request_ID) || val(r.Travel_Request) || val(r.Name);
   if (/req[\s-]?\d/i.test(direct)) return direct;
   for (var k in r) {
     if (!r.hasOwnProperty(k)) continue;
@@ -109,17 +186,72 @@ function getDepartment() {
   ZOHO.CREATOR.DATA.getRecords(config).then(function (response) {
     var rows = response.data || [];
 
-    var me = rows.filter(function (d) { return norm(d.HOD_Email) === loggedInUser; })[0];
-    isFinanceUser = !!me && norm(me.Department_Name) === norm(FINANCE_DEPT);
+    // a user can have several rows — Finance/Director if ANY of their rows says so
+    var mine = rows.filter(function (d) { return norm(d.HOD_Email) === loggedInUser; });
+    isFinanceUser = mine.some(function (d) { return norm(d.Department_Name) === norm(FINANCE_DEPT); });
+    directorFromDept = mine.some(function (d) { return /director/.test(norm(d.Department_Name)); });
+    recomputeDirector();
     console.log("ATRM role check → loginUser:", loggedInUser,
-      "| matched dept:", me ? val(me.Department_Name) : "(no HOD_Email match)",
-      "| isFinanceUser:", isFinanceUser);
+      "| depts:", mine.map(function (d) { return val(d.Department_Name); }).join(", ") || "(no HOD_Email match)",
+      "| isFinanceUser:", isFinanceUser, "| isDirectorUser:", isDirectorUser);
+    applyDefaultStatus();                 // Finance lands on their queue (All statuses)
+    if (allQuotes.length) buildRequestCards();
     render(); // role now known — redraw so Approve buttons reflect it
   }).catch(function (err) {
     console.warn("ATRM widget: department lookup failed", err);
     isFinanceUser = false; // fail closed — no finance powers if the lookup fails
+    directorFromDept = false;
+    recomputeDirector();
   });
 }
+
+// does this record belong to the logged-in user? (any field === the login email/user)
+function rowIsMine(r) {
+  for (var k in r) {
+    if (r.hasOwnProperty(k) && norm(r[k]) === loggedInUser) return true;
+  }
+  return false;
+}
+
+
+// Look the user up in Department_Master to decide if they are a Director (approves > $1000).
+function getDirector() {
+  var config = {
+    app_name: "air-travel-request-management",
+    report_name: "Department_Master",
+    max_records: 1000,
+    field_config: "all",
+  };
+  ZOHO.CREATOR.DATA.getRecords(config).then(function (response) {
+    var rows = response.data || [];
+    directorFromMaster = rows.some(function (r) {
+      if (!rowIsMine(r)) return false;
+      // department field says "Director"…
+      var d = norm(val(r.Department_Name) || val(r.Department) || val(r.Dept_Name) ||
+        val(r.DepartmentName) || val(r.Role) || val(r.Designation));
+      if (/director/.test(d)) return true;
+      // …or, if the field name differs, any field on my row that is exactly "Director"
+      for (var k in r) { if (r.hasOwnProperty(k) && norm(r[k]) === "director") return true; }
+      return false;
+    });
+    recomputeDirector();
+    console.log("ATRM director check (Department_Master) →", directorFromMaster, "| isDirectorUser:", isDirectorUser);
+    applyDefaultStatus();                 // Director lands on their queue (All statuses)
+    if (allQuotes.length) buildRequestCards();
+    render();
+  }).catch(function (err) {
+    // Department_Master is often not shared with widget users (403) — that's fine,
+    // the DuplicateDepartment lookup still grants the Director role.
+    console.warn("ATRM widget: Department_Master lookup failed", err);
+    directorFromMaster = false;
+    recomputeDirector();
+  });
+}
+
+// raw records by source, so the view page can MERGE quotations from DuplicateVQ and
+// (view-only) the HOD approval report before normalising.
+var vqRecords = [];   // DuplicateVQ
+var hodRecords = [];  // HOD_Request_Approval_for_HOD (view-only extra data source)
 
 function GetRecords() {
   showLoader();
@@ -131,9 +263,13 @@ function GetRecords() {
   };
   ZOHO.CREATOR.DATA.getRecords(config).then(function (response) {
     console.log(response.data);
-    finish(response.data || []);
+    vqRecords = response.data || [];
+    finish();
   }).catch(function (err) {
     console.warn("ATRM widget: fetch failed", err);
+    vqRecords = [];
+    // on the view page the HOD report may still have data even if DuplicateVQ failed
+    if (VIEW_ONLY && hodRecords.length) { finish(); return; }
     showEmpty("Couldn't load records",
       "The report \"" + config.report_name + "\" returned no data or the request failed. " +
       "Check the report link name and widget permissions, then hit Refresh.");
@@ -224,23 +360,78 @@ function fmtDur(mins) {
 
 var MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
 
-// parse "05-Aug-2026 14:00" / "12-Aug 03:40" / "10-Jul-2026 15:30" -> epoch ms (NaN if unparseable)
+// parse "05-Aug-2026 14:00" / "12-Aug 03:40" / "25-Jul-2026 8:15 pm" -> epoch ms (NaN if unparseable)
 function parseDateTime(s) {
   s = val(s);
-  var m = s.match(/(\d{1,2})[-\/\s]([A-Za-z]{3,9})(?:[-\/\s](\d{4}))?[\sT,]+(\d{1,2}):(\d{2})/);
+  var m = s.match(/(\d{1,2})[-\/\s]([A-Za-z]{3,9})(?:[-\/\s](\d{4}))?[\sT,]+(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?/);
   if (!m) return NaN;
   var mon = MONTHS[m[2].slice(0, 3).toLowerCase()];
   if (mon == null) return NaN;
   var year = m[3] ? +m[3] : 2000; // year sometimes omitted; a constant keeps intra-trip gaps correct
-  return new Date(year, mon, +m[1], +m[4], +m[5], 0).getTime();
+  var h = +m[4], ap = (m[6] || "").toLowerCase();
+  if (ap === "pm" && h < 12) h += 12;   // "8:15 pm" -> 20:15
+  if (ap === "am" && h === 12) h = 0;   // "12:10 am" -> 00:10
+  return new Date(year, mon, +m[1], h, +m[5], 0).getTime();
 }
 
-// arrival time of a leg: use its arrival if given, else departure + journey time
+// UTC offsets (minutes) by IATA airport code — used to turn local dep/arr clocks into
+// a TRUE elapsed duration (Johannesburg 10:05 → Dubai 20:15 reads 10h10m on the clocks
+// but is 8h10m in the air, Dubai running 2h ahead). Only zones WITHOUT daylight saving
+// are listed (Africa, Gulf, India, East Asia); an unknown code simply falls back to the
+// vendor-entered journey time — safer than being an hour off half the year (Europe/US/AU).
+var AIRPORT_TZ = {
+  // Southern & East Africa
+  HRE: 120, BUQ: 120, VFA: 120, JNB: 120, CPT: 120, DUR: 120, GBE: 120, LUN: 120,
+  LLW: 120, MPM: 120, KGL: 120, ADD: 180, NBO: 180, MBA: 180, DAR: 180, EBB: 180, JRO: 180,
+  // West / North Africa
+  LOS: 60, ABV: 60, ACC: 0, CAI: 120,
+  // Gulf / Middle East
+  DXB: 240, AUH: 240, SHJ: 240, MCT: 240, DOH: 180, BAH: 180, KWI: 180, RUH: 180, JED: 180,
+  // Indian subcontinent
+  DEL: 330, BOM: 330, NAG: 330, MAA: 330, BLR: 330, HYD: 330, CCU: 330, AMD: 330,
+  PNQ: 330, GOI: 330, COK: 330, AGR: 330, JAI: 330, LKO: 330, IXC: 330, PNY: 330,
+  TRZ: 330, IXM: 330, VTZ: 330, BBI: 330, PAT: 330, GAU: 330, IXB: 330, IDR: 330,
+  CMB: 330, DAC: 360, KTM: 345, KHI: 300, ISB: 300,
+  // East / South-East Asia
+  SIN: 480, KUL: 480, HKG: 480, PVG: 480, PEK: 480, CAN: 480, BKK: 420, SGN: 420, NRT: 540, HND: 540, ICN: 540
+};
+
+// "Johannesburg OR Tambo Airport (JNB)" / "Dubai - DXB" -> "JNB" / "DXB"
+function airportCode(place) {
+  var c = (place && place.city) || "";
+  var m = c.match(/\(([A-Za-z]{3})\)/) || c.match(/[-–]\s*([A-Za-z]{3})\s*$/) || c.match(/\b([A-Z]{3})\s*$/);
+  return m ? m[1].toUpperCase() : "";
+}
+
+// the airport's UTC offset in minutes, or null when unknown
+function placeOffset(place) {
+  var code = airportCode(place);
+  return AIRPORT_TZ.hasOwnProperty(code) ? AIRPORT_TZ[code] : null;
+}
+
+// true elapsed minutes of one leg: (arrival − departure) corrected for the timezone
+// difference between the two airports; falls back to the vendor-entered journey time
+// when times or timezones aren't available.
+function legElapsedMins(l) {
+  var dep = parseDateTime(l.dep), arr = parseDateTime(l.arr);
+  var oF = placeOffset(l.from), oT = placeOffset(l.at);
+  if (!isNaN(dep) && !isNaN(arr) && oF !== null && oT !== null) {
+    var m = Math.round((arr - dep) / 60000) - (oT - oF);
+    if (m > 0 && m < 4 * 1440) return m; // sanity: 0 < duration < 4 days
+  }
+  return durationMins(l.journey);
+}
+
+// arrival time of a leg: use its arrival if given, else departure + journey time,
+// shifted onto the DESTINATION's clock (layovers compare same-airport local times)
 function arrivalOf(l) {
   var arr = parseDateTime(l.arr);
   if (!isNaN(arr)) return arr;
   var dep = parseDateTime(l.dep), fly = durationMins(l.journey);
-  return (!isNaN(dep) && fly) ? dep + fly * 60000 : NaN;
+  if (isNaN(dep) || !fly) return NaN;
+  var oF = placeOffset(l.from), oT = placeOffset(l.at);
+  var shift = (oF !== null && oT !== null) ? (oT - oF) : 0;
+  return dep + (fly + shift) * 60000;
 }
 
 // layover we compute ourselves at each connection: next leg's departure minus this
@@ -258,12 +449,23 @@ function dirLayoverMins(segs) {
   return total;
 }
 
-// total elapsed travel time of a quote: every leg's journey time + the computed layovers
+// total travel time of one direction — first take-off to final touch-down including
+// layovers, timezone-corrected end-to-end when both endpoints have known clocks/zones;
+// else per-leg elapsed times + computed layovers.
+function dirDurationMins(segs) {
+  var first = segs[0], last = segs[segs.length - 1];
+  var dep = parseDateTime(first.dep), arr = parseDateTime(last.arr);
+  var oF = placeOffset(first.from), oT = placeOffset(last.at);
+  if (!isNaN(dep) && !isNaN(arr) && oF !== null && oT !== null) {
+    var m = Math.round((arr - dep) / 60000) - (oT - oF);
+    if (m > 0 && m < 6 * 1440) return m;
+  }
+  return segs.reduce(function (t, l) { return t + legElapsedMins(l); }, 0) + dirLayoverMins(segs);
+}
+
+// total elapsed travel time of a quote (all directions, timezone-corrected)
 function quoteDuration(q) {
-  return directions(q).reduce(function (t, d) {
-    var fly = d.segs.reduce(function (s, l) { return s + durationMins(l.journey); }, 0);
-    return t + fly + dirLayoverMins(d.segs);
-  }, 0);
+  return directions(q).reduce(function (t, d) { return t + dirDurationMins(d.segs); }, 0);
 }
 
 /* =====================================================================
@@ -360,13 +562,23 @@ function normalise(rec) {
 ===================================================================== */
 var allQuotes = [];
 
-function finish(records) {
-  allQuotes = (records || []).map(normalise);
+function finish() {
+  // merge DuplicateVQ with the view-only HOD records, de-duped by record/quotation id
+  var seen = {}, merged = [];
+  vqRecords.concat(hodRecords).forEach(function (r) {
+    var id = val(r.ID) || val(r.Quotation_ID);
+    var key = id || (val(r.travel_request) + "|" + val(r.Service_Provider_Name) + "|" + val(r.total_amount));
+    if (seen[key]) return;
+    seen[key] = true;
+    merged.push(r);
+  });
+  allQuotes = merged.map(normalise);
+
   if (!allQuotes.length) {
     showEmpty("No quotations yet", "Once vendors submit quotations against a travel request, they will appear here for comparison.");
     return;
   }
-  buildStatusSelect(); // sets the default status ("Submitted") first
+  buildStatusSelect(); // sets the default status
   buildRequestCards();  // …so the request cards honour it
   render();
   document.getElementById("stateCard").style.display = "none";
@@ -417,6 +629,7 @@ function requestSummaries() {
   var st = currentStatus();
   var map = {}, order = [];
   allQuotes.forEach(function (q) {
+    if (!allowedRequest(q.requestId)) return; // view page: only this person's own requests
     if (!map[q.requestId]) { map[q.requestId] = []; order.push(q.requestId); }
     map[q.requestId].push(q);
   });
@@ -450,8 +663,11 @@ function buildRequestCards() {
   }
 
   if (!summaries.length) {
-    el.innerHTML = '<div class="req-empty">No travel requests' +
-      (st ? ' with a &ldquo;' + esc(st) + '&rdquo; quotation.' : ' to show.') + '</div>';
+    var msg;
+    if (VIEW_ONLY && !allowedRequests) msg = "Loading your travel requests&hellip;";
+    else if (VIEW_ONLY) msg = "You have no travel requests" + (st ? ' with a &ldquo;' + esc(st) + '&rdquo; quotation.' : ".");
+    else msg = "No travel requests" + (st ? ' with a &ldquo;' + esc(st) + '&rdquo; quotation.' : " to show.");
+    el.innerHTML = '<div class="req-empty">' + msg + "</div>";
     selectedRequest = null;
     return;
   }
@@ -523,9 +739,23 @@ function buildStatusSelect() {
   });
   sel.innerHTML = '<option value="">All statuses</option>' +
     opts.map(function (s) { return "<option>" + esc(s) + "</option>"; }).join("");
-  // default view = Submitted quotations (fall back to All if there are none)
-  var submitted = opts.filter(function (s) { return s.toLowerCase() === "submitted"; })[0];
-  sel.value = submitted || "";
+  applyDefaultStatus();
+}
+
+// default Quote Status by role: Travel Desk → "Submitted" (their queue); Finance,
+// Director and the view page → "All statuses" so they see & act on forwarded/pending
+// requests (which aren't Submitted). Not re-applied once the user picks a status.
+var userChangedStatus = false;
+function defaultStatus() {
+  if (!VIEW_ONLY && !isFinanceUser && !isDirectorUser) return "Submitted";
+  return ""; // All statuses
+}
+function applyDefaultStatus() {
+  var sel = document.getElementById("selStatus");
+  if (!sel || userChangedStatus) return;
+  var want = defaultStatus();
+  var has = [].some.call(sel.options, function (o) { return o.value === want; });
+  sel.value = has ? want : "";
 }
 
 // quotations for the selected travel request + status, cheapest first.
@@ -639,24 +869,25 @@ function showAlert(opts) {
 }
 
 /* =====================================================================
-   APPROVAL — two-stage: Travel Desk first, then Finance
-   Button visibility by role:
-   - Travel Desk (any non-finance) : Approve shows only while every quote in the
-                          request is still fresh (Open/Submitted). Approving one
-                          forwards it to Finance and the travel-desk buttons go away.
-   - Finance & Accounts : Approve shows ONLY on a quote already forwarded by the
-                          travel desk ("Approval Pending by Finance Team"). Before
-                          the travel desk acts, finance can only view the dashboard.
+   APPROVAL — up to three stages: Travel Desk -> Finance -> (Director, if > $1000)
+   - Travel Desk (any non-finance/non-director) : approve while every quote is fresh
+                          (Open/Submitted) -> forwards to Finance, others Open.
+   - Finance & Accounts : approve an Open / "Approval Pending by Finance Team" quote.
+       * fare <= $1000 -> Approved (final), others Rejected.
+       * fare  > $1000 -> "Approval Pending by Director", others Rejected.
+   - Director (from Department_Master) : approve an "Approval Pending by Director"
+                          quote -> Approved (final).
    - Nobody once the request already has an Approved quote.
-
-   Actions:
-   - Travel desk approves a quote -> Approval Pending by Finance Team, others Open.
-   - Finance approves the pending quote -> final: Approved, all others Rejected.
 ===================================================================== */
 
 // quote already sent to finance — only a finance user can finalise it
 function isFinancePending(status) {
   return (status || "").toLowerCase() === "approval pending by finance team";
+}
+
+// quote (> $1000) forwarded by finance to the Director for final approval
+function isDirectorPending(status) {
+  return (status || "").toLowerCase() === "approval pending by director";
 }
 
 // a "fresh" quote no one has acted on yet
@@ -676,7 +907,8 @@ function isInvalid(status) {
 function requestActedOn(requestId) {
   return groupOf(requestId).some(function (q) {
     var t = (q.status || "").toLowerCase();
-    return t === "approval pending by finance team" || t === "approved" || t === "rejected";
+    return t === "approval pending by finance team" || t === "approval pending by director" ||
+      t === "approved" || t === "rejected";
   });
 }
 
@@ -688,15 +920,14 @@ var VIEW_ONLY = !!(typeof window !== "undefined" && window.VIEW_ONLY);
 function canApprove(q) {
   if (VIEW_ONLY) return false;                        // view-only page: no actions
   if (groupHasApproved(q.requestId)) return false;   // request already decided
-  if (isFinanceUser) {
-    // once the travel desk has forwarded a quote (making the others Open), finance
-    // can approve ANY quote in the request — the forwarded one OR any Open one.
-    // Before the desk acts everything is still Submitted, so finance stays view-only.
-    var t = (q.status || "").toLowerCase();
-    return isFinancePending(q.status) || t === "open";
-  }
-  // travel desk: only before the first approval is submitted for this request
-  return isFresh(q.status) && !requestActedOn(q.requestId);
+  var t = (q.status || "").toLowerCase();
+  // Director finalises a > $1000 quote finance forwarded to them
+  if (isDirectorUser && isDirectorPending(q.status)) return true;
+  // Finance approves an Open or finance-pending quote (NOT a director-pending one)
+  if (isFinanceUser && (t === "open" || isFinancePending(q.status))) return true;
+  // Travel desk (neither finance nor director): only while the request is still fresh
+  if (!isFinanceUser && !isDirectorUser) return isFresh(q.status) && !requestActedOn(q.requestId);
+  return false;
 }
 
 // all quotations of the same travel request (ignores the status filter on purpose)
@@ -750,34 +981,54 @@ function approveQuote(id) {
   var group = groupOf(q.requestId);
   // other quotes in the request, EXCLUDING invalid ones (leave dead quotes as-is)
   var others = group.filter(function (g) { return g.id !== q.id && !isInvalid(g.status); });
-  // Only a finance user finalises a quote. Everyone else (incl. picking the
-  // lowest quote) routes it to finance for approval.
-  var isFinal = isFinanceUser;
+  var rejectOthers = others.map(function (g) { return { id: g.id, status: "Rejected" }; });
+  var openOthers = others.map(function (g) { return { id: g.id, status: "Open" }; });
+  var money = CURRENCY.format(q.total);
 
-  var dialog = isFinal
-    ? {
-      icon: "brand",
-      title: "Approve this quotation?",
-      body: "Approve " + q.vendor + " at " + CURRENCY.format(q.total) + ".\n\nAll other quotations for " + q.requestId + " will be marked Rejected.",
+  // Work out this user's action from role + status + price.
+  var dialog, updates;
+  if (isDirectorUser && isDirectorPending(q.status)) {
+    // Director finalises a > $1000 quote
+    dialog = {
+      title: "Approve as Director?",
+      body: "Approve " + q.vendor + " at " + money + " for " + q.requestId + ".\n\nThis quotation is over " +
+        CURRENCY.format(DIRECTOR_THRESHOLD) + " and you are giving the final Director approval.",
       confirmText: "Approve"
-    }
-    : {
-      icon: "brand",
+    };
+    updates = [{ id: q.id, status: "Approved" }].concat(rejectOthers);
+  } else if (isFinanceUser && q.total > DIRECTOR_THRESHOLD) {
+    // Finance approves, but > $1000 -> needs Director sign-off next
+    dialog = {
+      title: "Send for Director approval?",
+      body: "Approve " + q.vendor + " at " + money + ".\n\nThis quotation is over " + CURRENCY.format(DIRECTOR_THRESHOLD) +
+        ", so it needs Director approval (Approval Pending by Director). All other quotations for " + q.requestId + " will be Rejected.",
+      confirmText: "Send to Director"
+    };
+    updates = [{ id: q.id, status: "Approval Pending by Director" }].concat(rejectOthers);
+  } else if (isFinanceUser) {
+    // Finance final approval (<= $1000)
+    dialog = {
+      title: "Approve this quotation?",
+      body: "Approve " + q.vendor + " at " + money + ".\n\nAll other quotations for " + q.requestId + " will be marked Rejected.",
+      confirmText: "Approve"
+    };
+    updates = [{ id: q.id, status: "Approved" }].concat(rejectOthers);
+  } else {
+    // Travel desk forwards to Finance
+    dialog = {
       title: "Send for finance approval?",
-      body: "Approve " + q.vendor + " at " + CURRENCY.format(q.total) + ".\n\nThis quotation will be sent for finance approval (Approval Pending by Finance Team) and the other quotations will be set to Open.",
+      body: "Approve " + q.vendor + " at " + money + ".\n\nThis quotation will be sent for finance approval (Approval Pending by Finance Team) and the other quotations will be set to Open.",
       confirmText: "Send to finance"
     };
+    updates = [{ id: q.id, status: "Approval Pending by Finance Team" }].concat(openOthers);
+  }
+  dialog.icon = "brand";
 
   showConfirm(dialog).then(function (ok) {
     if (!ok) return;
 
     // freeze all approve buttons while we save
     document.querySelectorAll(".btn-approve").forEach(function (b) { b.disabled = true; b.textContent = "Saving…"; });
-
-    // approved/forwarded quote first, then every OTHER quote in the request
-    var updates = isFinal
-      ? [{ id: q.id, status: "Approved" }].concat(others.map(function (g) { return { id: g.id, status: "Rejected" }; }))
-      : [{ id: q.id, status: "Approval Pending by Finance Team" }].concat(others.map(function (g) { return { id: g.id, status: "Open" }; }));
 
     applyUpdates(updates).then(function (failures) {
       if (failures.length) {
@@ -1132,9 +1383,8 @@ function renderTable(quotes, best, infant) {
       var isRet = d.dir === "ret";
       var badge = isRet ? "RETURN" : "OUTBOUND";
       var nos = d.segs.map(function (seg) { return esc(seg.flightNo); }).filter(Boolean).join(" · ") || "—";
-      var fly = d.segs.reduce(function (t, l) { return t + durationMins(l.journey); }, 0);
       var lay = dirLayoverMins(d.segs);      // layover computed from the flight times
-      var dur = fly + lay;
+      var dur = dirDurationMins(d.segs);     // timezone-corrected end-to-end travel time
       var cls = [];
       if (di < dirs.length - 1) cls.push("dir-mid"); // dashed divider between the two directions
       if (isRec) cls.push("rec-row");
@@ -1159,6 +1409,7 @@ function renderTable(quotes, best, infant) {
    6. EVENTS
 ===================================================================== */
 document.getElementById("selStatus").addEventListener("change", function () {
+  userChangedStatus = true; // stop auto-defaulting once the user picks a status
   buildRequestCards(); // the request cards shown depend on the selected status
   render();
 });
