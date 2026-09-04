@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Amadeus Itinerary Converter</title>
+  <link rel="stylesheet" href="css/widget.css">
+  <style>
+    /* page-specific bits (everything else reuses widget.css) */
+    .conv-input {
+      width: 100%;
+      min-height: 130px;
+      font: 13px/1.6 ui-monospace, Consolas, monospace;
+      color: var(--ink);
+      background: #fbfbf8;
+      border: 1.5px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px;
+      resize: vertical;
+      white-space: pre;
+    }
+    .conv-input:focus { outline: none; border-color: var(--brand-dark); box-shadow: 0 0 0 3px var(--brand-soft); }
+    .conv-bar { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
+    .conv-bar .field { max-width: 120px; }
+    .btn-convert {
+      border: 0; cursor: pointer;
+      background: var(--ink); color: var(--brand);
+      font: inherit; font-size: 13px; font-weight: 800; letter-spacing: .03em;
+      padding: 10px 22px; border-radius: 999px;
+    }
+    .btn-convert:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(24,24,27,.25); }
+    .conv-warn {
+      margin-top: 12px; padding: 9px 13px;
+      background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px;
+      color: var(--bad); font-size: 12.5px; white-space: pre-wrap;
+    }
+    .dir-total {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      margin: 8px 0 18px; font-size: 13px; color: var(--ink-2);
+    }
+    .dir-total b { color: var(--ink); }
+    .lay-note { color: var(--ink-3); font-style: italic; }
+    td.mono, .mono { font-variant-numeric: tabular-nums; }
+    .copyable {
+      cursor: copy;
+      background: #fbfbf8; border: 1px dashed var(--line); border-radius: 7px;
+      padding: 2px 8px; font: 12px ui-monospace, Consolas, monospace; color: var(--ink);
+      display: inline-block;
+    }
+    .copyable:hover { border-color: var(--brand-dark); background: var(--brand-soft); }
+    .copied-tip {
+      position: fixed; z-index: 9999; background: var(--ink); color: var(--brand);
+      font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 999px;
+      pointer-events: none; opacity: 0; transition: opacity .15s ease;
+    }
+    .copied-tip.show { opacity: 1; }
+    .tz-star { color: var(--warn); font-weight: 800; }
+    .foot-note { margin-top: 10px; font-size: 12px; color: var(--ink-3); }
+    .cmp.conv { min-width: 0; }
+    .cmp.conv th, .cmp.conv td { white-space: normal; }
+  </style>
+</head>
+
+<body>
+
+  <!-- ============ HEADER ============ -->
+  <header class="hero">
+    <div class="hero-row">
+      <div class="hero-badge">
+        <svg viewBox="0 0 24 24">
+          <path
+            d="M21.5 15.5v-2l-8.5-5V3.25a1.5 1.5 0 0 0-3 0V8.5l-8.5 5v2l8.5-2.5v5.25L7.5 20v1.5l4.5-1 4.5 1V20L14 18.25V13l7.5 2.5z" />
+        </svg>
+      </div>
+      <div>
+        <h1>Amadeus Itinerary Converter</h1>
+        <p>Paste GDS segment lines &mdash; worldwide airports &amp; airlines, timezone/DST-correct durations, copy-ready
+          values for the quotation form</p>
+      </div>
+      <div class="spacer"></div>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <!-- ============ INPUT ============ -->
+    <section class="card">
+      <div class="card-head">
+        <div class="card-title"><span class="dot"></span>Paste Amadeus segments</div>
+        <div class="card-sub">Both Amadeus formats work: booked segments
+          (<b>ET 892&nbsp; Q&nbsp; 21SEP&nbsp; HRE I ADD 2&nbsp; 0220&nbsp; 0755</b>) and availability lines
+          (<b>1 ET 872 C7 J7 &hellip; /HRE I ADD 2 1505 2015 E0/788</b>). Availability lines carry no date &mdash; set
+          the <b>Travel date</b> below. <b>+1</b> means next-day.</div>
+      </div>
+      <textarea id="inp" class="conv-input" spellcheck="false">ET 892  Q  21SEP  HRE I ADD 2  0220  0755
+ET 318  Q  21SEP  ADD 2 NBO1A  1045  1310
+ET 319  T  25SEP  NBO1C ADD 2  1730  1930
+ET 893  T  25SEP  ADD 2 HRE I  2200  0130+1</textarea>
+      <div class="conv-bar">
+        <div class="field">
+          <label for="year">Year</label>
+          <input type="number" id="year" min="2020" max="2099" style="width:110px">
+        </div>
+        <div class="field" style="max-width:170px">
+          <label for="tdate">Travel date <small>(availability lines)</small></label>
+          <input type="date" id="tdate" style="width:160px">
+        </div>
+        <button class="btn-convert" id="btnConvert" type="button">Convert</button>
+        <div class="meta-chips" id="sumChips"></div>
+      </div>
+      <div class="conv-warn" id="warnBox" style="display:none"></div>
+    </section>
+
+    <!-- ============ READABLE ITINERARY ============ -->
+    <section class="card" id="itinCard" style="display:none">
+      <div class="card-head">
+        <div class="card-title"><span class="dot"></span>Itinerary</div>
+        <div class="card-sub">Durations are true elapsed times &mdash; timezone differences between airports are corrected
+          automatically</div>
+      </div>
+      <div id="itin"></div>
+      <div class="foot-note" id="tzNote" style="display:none"><span class="tz-star">*</span> timezone unknown for this
+        airport &mdash; the duration shown is the raw clock difference.</div>
+    </section>
+
+    <!-- ============ CREATOR FORM VALUES ============ -->
+    <section class="card" id="formCard" style="display:none">
+      <div class="card-head">
+        <div class="card-title"><span class="dot"></span>Quotation form values</div>
+        <div class="card-sub">Click any value to copy it. Outbound rows go into <b>Travel Ticket Options</b>; return rows
+          into the <b>Return</b> subform.</div>
+      </div>
+      <div id="formOut"></div>
+    </section>
+
+  </main>
+
+  <div class="copied-tip" id="copiedTip">Copied!</div>
+
+  <!-- worldwide airport/airline database (generated from the OpenFlights open dataset) -->
+  <script src="js/airport-data.js"></script>
+
+  <script>
+    /* =====================================================================
+       Amadeus segment parser — worldwide airports (IANA timezones, DST-correct)
+    ===================================================================== */
+
+    // FALLBACK fixed UTC offsets (minutes) — used only when an airport code is
+    // missing from the worldwide AIRPORT_DB (js/airport-data.js).
+    var AIRPORT_TZ = {
+      HRE: 120, BUQ: 120, VFA: 120, JNB: 120, CPT: 120, DUR: 120, GBE: 120, LUN: 120,
+      LLW: 120, MPM: 120, KGL: 120, ADD: 180, NBO: 180, MBA: 180, DAR: 180, EBB: 180, JRO: 180,
+      LOS: 60, ABV: 60, ACC: 0, CAI: 120,
+      DXB: 240, AUH: 240, SHJ: 240, MCT: 240, DOH: 180, BAH: 180, KWI: 180, RUH: 180, JED: 180,
+      DEL: 330, BOM: 330, NAG: 330, MAA: 330, BLR: 330, HYD: 330, CCU: 330, AMD: 330,
+      PNQ: 330, GOI: 330, COK: 330, AGR: 330, JAI: 330, LKO: 330, IXC: 330, PNY: 330,
+      TRZ: 330, IXM: 330, VTZ: 330, BBI: 330, PAT: 330, GAU: 330, IXB: 330, IDR: 330,
+      CMB: 330, DAC: 360, KTM: 345, KHI: 300, ISB: 300,
+      SIN: 480, KUL: 480, HKG: 480, PVG: 480, PEK: 480, CAN: 480, BKK: 420, SGN: 420, NRT: 540, HND: 540, ICN: 540
+    };
+
+    // curated short-name OVERRIDES for the worldwide DB (nicer than the raw dataset,
+    // e.g. "Puducherry" instead of its dataset spelling); other codes come from the DB
+    var AIRPORT_NAME = {
+      HRE: "Harare", BUQ: "Bulawayo", VFA: "Victoria Falls", JNB: "Johannesburg", CPT: "Cape Town",
+      DUR: "Durban", GBE: "Gaborone", LUN: "Lusaka", LLW: "Lilongwe", MPM: "Maputo", KGL: "Kigali",
+      ADD: "Addis Ababa", NBO: "Nairobi", MBA: "Mombasa", DAR: "Dar es Salaam", EBB: "Entebbe",
+      JRO: "Kilimanjaro", LOS: "Lagos", ABV: "Abuja", ACC: "Accra", CAI: "Cairo",
+      DXB: "Dubai", AUH: "Abu Dhabi", SHJ: "Sharjah", MCT: "Muscat", DOH: "Doha", BAH: "Bahrain",
+      KWI: "Kuwait", RUH: "Riyadh", JED: "Jeddah",
+      DEL: "New Delhi", BOM: "Mumbai", NAG: "Nagpur", MAA: "Chennai", BLR: "Bengaluru", HYD: "Hyderabad",
+      CCU: "Kolkata", AMD: "Ahmedabad", PNQ: "Pune", GOI: "Goa", COK: "Kochi", AGR: "Agra", JAI: "Jaipur",
+      LKO: "Lucknow", IXC: "Chandigarh", PNY: "Puducherry", TRZ: "Tiruchirappalli", IXM: "Madurai",
+      VTZ: "Visakhapatnam", BBI: "Bhubaneswar", PAT: "Patna", GAU: "Guwahati", IXB: "Bagdogra", IDR: "Indore",
+      CMB: "Colombo", DAC: "Dhaka", KTM: "Kathmandu", KHI: "Karachi", ISB: "Islamabad",
+      SIN: "Singapore", KUL: "Kuala Lumpur", HKG: "Hong Kong", PVG: "Shanghai", PEK: "Beijing",
+      CAN: "Guangzhou", BKK: "Bangkok", SGN: "Ho Chi Minh City", NRT: "Tokyo", HND: "Tokyo", ICN: "Seoul",
+      LHR: "London", LGW: "London", CDG: "Paris", FRA: "Frankfurt", AMS: "Amsterdam", IST: "Istanbul", JFK: "New York"
+    };
+
+    // curated airline-name OVERRIDES; every other IATA code resolves from the worldwide
+    // AIRLINE_DB. COSMETIC ONLY — a code found in neither still parses and converts
+    // perfectly, it just shows as the raw code. To override a name: CODE: "Name",
+    var AIRLINE_NAME = {
+      ET: "Ethiopian Airlines", EK: "Emirates", QR: "Qatar Airways", KQ: "Kenya Airways",
+      SA: "South African Airways", FA: "FlySafair", AI: "Air India", "6E": "IndiGo", UK: "Vistara",
+      BA: "British Airways", LH: "Lufthansa", TK: "Turkish Airlines", MS: "EgyptAir",
+      WB: "RwandAir", UM: "Air Zimbabwe", SQ: "Singapore Airlines", EY: "Etihad Airways",
+      "4Z": "Airlink", FN: "fastjet", MK: "Air Mauritius", PW: "Precision Air", KP: "ASKY Airlines",
+      AT: "Royal Air Maroc", SV: "Saudia", UL: "SriLankan Airlines", PK: "PIA", BG: "Biman Bangladesh",
+      IX: "Air India Express", SG: "SpiceJet", QP: "Akasa Air", AF: "Air France", KL: "KLM",
+      VS: "Virgin Atlantic", CX: "Cathay Pacific", MH: "Malaysia Airlines", TG: "Thai Airways"
+    };
+
+    var MONTHS = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
+    var MON_NAME = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+    function pad2(n) { return (n < 10 ? "0" : "") + n; }
+    function fmtDur(mins) {
+      if (!mins && mins !== 0) return "—";
+      var h = Math.floor(mins / 60), m = mins % 60;
+      return ((h ? h + "h " : "") + (m ? m + "m" : "")).trim() || "0m";
+    }
+    // Creator's duration wording: "0 Days 4 Hours 35 Minutes"
+    function creatorDur(mins) {
+      var d = Math.floor(mins / 1440), h = Math.floor((mins % 1440) / 60), m = mins % 60;
+      return d + " Days " + h + " Hours " + m + " Minutes";
+    }
+    function fmtDate(dt) { return pad2(dt.getDate()) + "-" + MON_NAME[dt.getMonth()] + "-" + dt.getFullYear(); }
+    function fmtDateTime(dt) { return fmtDate(dt) + " " + pad2(dt.getHours()) + ":" + pad2(dt.getMinutes()); }
+    // worldwide DB (js/airport-data.js); curated maps above act as pretty-name overrides
+    var DB_A = (typeof AIRPORT_DB !== "undefined") ? AIRPORT_DB : {};
+    var DB_L = (typeof AIRLINE_DB !== "undefined") ? AIRLINE_DB : {};
+    function cityName(code) {
+      if (AIRPORT_NAME[code]) return AIRPORT_NAME[code];
+      if (DB_A[code] && DB_A[code][0]) return DB_A[code][0];
+      return code;
+    }
+    function airlineName(code) { return AIRLINE_NAME[code] || DB_L[code] || ""; }
+    function cityLabel(code) { return cityName(code) + " - " + code; }
+    function zoneOf(code) { return DB_A[code] ? DB_A[code][1] : null; }
+    function tzOf(code) { return AIRPORT_TZ.hasOwnProperty(code) ? AIRPORT_TZ[code] : null; }
+
+    /* ---- IANA-zone time math (DST-correct, uses the browser's tz database) ---- */
+    var dtfCache = {};
+    function wallUTC(zone, date) { // the zone's wall-clock reading at `date`, as UTC ms
+      var dtf = dtfCache[zone] || (dtfCache[zone] = new Intl.DateTimeFormat("en-US", {
+        timeZone: zone, hour12: false,
+        year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit"
+      }));
+      var p = {};
+      dtf.formatToParts(date).forEach(function (x) { p[x.type] = x.value; });
+      return Date.UTC(+p.year, +p.month - 1, +p.day, (+p.hour) % 24, +p.minute);
+    }
+    // local wall time in `zone` -> real UTC instant (two passes to settle DST edges)
+    function localToUTC(zone, y, mo, d, h, mi) {
+      try {
+        var target = Date.UTC(y, mo, d, h, mi);
+        var off = wallUTC(zone, new Date(target)) - target; // offset guessed at `target`
+        var utc = target - off;
+        off = wallUTC(zone, new Date(utc)) - utc;           // refined at the guessed instant
+        return target - off;
+      } catch (e) { return null; } // zone name this browser doesn't know
+    }
+    // UTC instant of a departure/arrival at an airport: IANA zone first (DST-correct),
+    // fixed-offset fallback table second, null when the airport is unknown
+    function utcOf(dt, code) {
+      var zone = zoneOf(code);
+      if (zone) {
+        var u = localToUTC(zone, dt.getFullYear(), dt.getMonth(), dt.getDate(), dt.getHours(), dt.getMinutes());
+        if (u !== null) return u;
+      }
+      var off = tzOf(code);
+      if (off !== null) return Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate(), dt.getHours(), dt.getMinutes()) - off * 60000;
+      return null;
+    }
+
+    // common aircraft type codes (availability lines end with e.g. "E0/788")
+    var EQUIP = {
+      "788": "Boeing 787-8", "789": "Boeing 787-9", "781": "Boeing 787-10",
+      "77W": "Boeing 777-300ER", "772": "Boeing 777-200", "773": "Boeing 777-300", "77L": "Boeing 777-200LR",
+      "738": "Boeing 737-800", "739": "Boeing 737-900", "73H": "Boeing 737-800", "7M8": "Boeing 737 MAX 8",
+      "744": "Boeing 747-400", "359": "Airbus A350-900", "35K": "Airbus A350-1000", "388": "Airbus A380",
+      "332": "Airbus A330-200", "333": "Airbus A330-300", "339": "Airbus A330-900neo",
+      "320": "Airbus A320", "319": "Airbus A319", "321": "Airbus A321", "32N": "Airbus A320neo", "32Q": "Airbus A321neo",
+      "223": "Airbus A220-300", "DH8": "Dash 8", "DH4": "Dash 8-400", "AT7": "ATR 72",
+      "E90": "Embraer E190", "E95": "Embraer E195", "CR9": "CRJ-900"
+    };
+    function equipName(code) { return code ? (EQUIP[code] || code) : ""; }
+
+    // one Amadeus line -> leg { airline, fltNo, cls, from:{code,term}, to:{code,term},
+    //   dep:Date, arr:Date, plus, option, equip } | null (blank/noise) | { error }
+    // Two formats:
+    //   booked segment:    ET 892  Q  21SEP  HRE I ADD 2  0220  0755
+    //   availability line: 1 ET 872 C7 J7 D6 ... /HRE I ADD 2 1505 2015 E0/788
+    function parseLine(line, year, base) {
+      var raw = line.trim();
+      if (!raw) return null;
+      var t = raw.toUpperCase();
+
+      // availability continuation rows of class counts ("BO MO KO LO ... 00") — skip quietly
+      var toks = t.split(/\s+/);
+      if (t.indexOf("/") < 0 && !/\d{3,}/.test(t) && toks.length >= 4 &&
+        toks.every(function (x) { return /^[A-Z0-9]{1,3}$/.test(x); })) return null;
+
+      /* ---- format 1: booked segment (has its own date) ---- */
+      var b = t.replace(/^\d+\s*[.)]?\s+/, "").match(
+        /^([A-Z0-9]{2})\s*(\d{2,4})\s+([A-Z]{1,2})\s+(\d{1,2})([A-Z]{3})(\d{2})?\s+([A-Z]{3})\s?([A-Z0-9]{1,2})?\s+([A-Z]{3})\s?([A-Z0-9]{1,2})?\s+(\d{4})\s+(\d{4})(?:\s*\+\s*(\d))?/
+      );
+      if (b && MONTHS[b[5]] != null) {
+        var mon = MONTHS[b[5]];
+        var y = b[6] ? 2000 + (+b[6]) : year;
+        var plus = b[13] ? +b[13] : 0;
+        return {
+          airline: b[1], fltNo: b[2], cls: b[3],
+          from: { code: b[7], term: b[8] || "" },
+          to: { code: b[9], term: b[10] || "" },
+          dep: new Date(y, mon, +b[4], +b[11].slice(0, 2), +b[11].slice(2)),
+          arr: new Date(y, mon, (+b[4]) + plus, +b[12].slice(0, 2), +b[12].slice(2)),
+          plus: plus, option: null, equip: ""
+        };
+      }
+
+      /* ---- format 2: availability line (no date — uses the Travel date field) ---- */
+      var slash = t.indexOf("/");
+      if (slash > 0 && /\d{4}/.test(t)) {
+        var pm = t.slice(0, slash).match(/^(?:(\d{1,2})\s+)?\*?\s*([A-Z0-9]{2})\s*(\d{2,4})\b/);
+        var qm = t.slice(slash + 1).match(
+          /^\s*([A-Z]{3})\s?([A-Z0-9]{1,2})?\s+([A-Z]{3})\s?([A-Z0-9]{1,2})?\s+(\d{4})(?:\+(\d))?\s+(\d{4})(?:\+(\d))?\s*E?[0O]?\s*(?:\/\s*([A-Z0-9]{2,4}))?/
+        );
+        if (pm && qm) {
+          var dPlus = qm[6] ? +qm[6] : 0, aPlus = qm[8] ? +qm[8] : 0;
+          return {
+            airline: pm[2], fltNo: pm[3], cls: "",
+            from: { code: qm[1], term: qm[2] || "" },
+            to: { code: qm[3], term: qm[4] || "" },
+            dep: new Date(base.y, base.mo, base.d + dPlus, +qm[5].slice(0, 2), +qm[5].slice(2)),
+            arr: new Date(base.y, base.mo, base.d + aPlus, +qm[7].slice(0, 2), +qm[7].slice(2)),
+            plus: aPlus, option: pm[1] ? +pm[1] : null, equip: qm[9] || ""
+          };
+        }
+      }
+      return { error: raw };
+    }
+
+    // true elapsed minutes of one leg — UTC instant at each airport (DST-correct);
+    // tzKnown=false when either airport is unknown (raw clock difference shown with *)
+    function legElapsed(l) {
+      var du = utcOf(l.dep, l.from.code), au = utcOf(l.arr, l.to.code);
+      if (du !== null && au !== null) {
+        var m = Math.round((au - du) / 60000);
+        if (m > 0 && m < 4 * 1440) return { mins: m, tzKnown: true };
+      }
+      return { mins: Math.round((l.arr - l.dep) / 60000), tzKnown: false };
+    }
+
+    // layover between consecutive legs (same airport; UTC-based when possible)
+    function layoverMins(prev, next) {
+      var au = utcOf(prev.arr, prev.to.code), du = utcOf(next.dep, next.from.code);
+      if (au !== null && du !== null) return Math.round((du - au) / 60000);
+      return Math.round((next.dep - prev.arr) / 60000);
+    }
+
+    // split legs into directions: a new direction starts when the chain breaks or
+    // there is a stop of more than 24 hours (that's a destination, not a layover)
+    function splitDirections(legs) {
+      var dirs = [];
+      legs.forEach(function (l, i) {
+        var prev = legs[i - 1];
+        if (!prev || l.from.code !== prev.to.code || (l.dep - prev.arr) > 24 * 3600000) dirs.push([]);
+        dirs[dirs.length - 1].push(l);
+      });
+      return dirs;
+    }
+
+    function dirLabel(dirs, i) {
+      if (i === 0) return "OUTBOUND";
+      var home = dirs[0][0].from.code;
+      var d = dirs[i];
+      return d[d.length - 1].to.code === home ? "RETURN" : "TRIP " + (i + 1);
+    }
+
+    // group legs for display. An availability paste with option numbers holds
+    // ALTERNATIVE routings (OPTION 1 / OPTION 2 …, kept in paste order — a numberless
+    // availability line continues the current option); a booked itinerary is split
+    // into OUTBOUND / RETURN instead.
+    function groupLegs(legs) {
+      var groups = [];
+      if (legs.some(function (l) { return l.option != null; })) {
+        legs.forEach(function (l) {
+          if (l.option != null || !groups.length) {
+            var n = l.option != null ? l.option : groups.length + 1;
+            groups.push({ label: "OPTION " + n, cls: "out", isOption: true, segs: [] });
+          }
+          groups[groups.length - 1].segs.push(l);
+        });
+        return groups;
+      }
+      legs.sort(function (a, b) { return a.dep - b.dep; });
+      splitDirections(legs).forEach(function (segs, i, dirs) {
+        var label = dirLabel(dirs, i);
+        groups.push({ label: label, cls: label === "RETURN" ? "ret" : "out", isOption: false, segs: segs });
+      });
+      return groups;
+    }
+
+    // end-to-end duration of a direction (layovers included), tz-corrected when possible
+    function dirElapsed(segs) {
+      var first = segs[0], last = segs[segs.length - 1];
+      var du = utcOf(first.dep, first.from.code), au = utcOf(last.arr, last.to.code);
+      if (du !== null && au !== null) {
+        var m = Math.round((au - du) / 60000);
+        if (m > 0 && m < 6 * 1440) return { mins: m, tzKnown: true };
+      }
+      // fallback: per-leg elapsed + layovers
+      var total = 0, known = true;
+      segs.forEach(function (l, i) {
+        var e = legElapsed(l);
+        total += e.mins; if (!e.tzKnown) known = false;
+        if (i) total += layoverMins(segs[i - 1], l);
+      });
+      return { mins: total, tzKnown: known };
+    }
+
+    function airportHtml(p) {
+      return "<b>" + esc(cityName(p.code)) + "</b> (" + esc(p.code) + ")" + (p.term ? " <small>T" + esc(p.term) + "</small>" : "");
+    }
+    function copyable(v) { return '<span class="copyable" data-copy="' + esc(v) + '">' + esc(v) + "</span>"; }
+
+    function convert() {
+      var year = +document.getElementById("year").value || new Date().getFullYear();
+      // base date for availability lines (they carry no date of their own)
+      var td = document.getElementById("tdate").value, base;
+      if (td) { var tp = td.split("-"); base = { y: +tp[0], mo: +tp[1] - 1, d: +tp[2] }; }
+      else { var now = new Date(); base = { y: now.getFullYear(), mo: now.getMonth(), d: now.getDate() }; }
+
+      var lines = document.getElementById("inp").value.split(/\r?\n/);
+      var legs = [], bad = [];
+      lines.forEach(function (ln) {
+        var r = parseLine(ln, year, base);
+        if (!r) return;
+        if (r.error) { bad.push(r.error); return; }
+        legs.push(r);
+      });
+
+      var warn = document.getElementById("warnBox");
+      warn.style.display = bad.length ? "" : "none";
+      warn.textContent = bad.length ? ("Couldn't read " + bad.length + " line(s):\n" + bad.join("\n")) : "";
+
+      var itinCard = document.getElementById("itinCard");
+      var formCard = document.getElementById("formCard");
+      var chips = document.getElementById("sumChips");
+      if (!legs.length) { itinCard.style.display = "none"; formCard.style.display = "none"; chips.innerHTML = ""; return; }
+
+      var groups = groupLegs(legs);
+      var hasOpt = groups.length && groups[0].isOption;
+      var anyTzUnknown = false;
+
+      /* ---- summary chips ---- */
+      var o = groups[0].segs, routeFrom = o[0].from.code, routeTo = o[o.length - 1].to.code;
+      chips.innerHTML =
+        '<span class="chip">✈ <b>' +
+        (hasOpt ? groups.length + " routing option" + (groups.length > 1 ? "s" : "")
+          : (groups.length > 1 ? "Round Trip" : "One-way")) + "</b></span>" +
+        '<span class="chip">🛫 ' + esc(cityName(routeFrom)) + " &rarr; " + esc(cityName(routeTo)) + "</span>" +
+        '<span class="chip">🏷 <b>' + legs.length + "</b> flight" + (legs.length > 1 ? "s" : "") + "</span>";
+
+      /* ---- readable itinerary ---- */
+      var html = "";
+      groups.forEach(function (g) {
+        var label = g.label, cls = g.cls, segs = g.segs;
+        var rows = "";
+        segs.forEach(function (l, i) {
+          if (i) {
+            var lay = layoverMins(segs[i - 1], l);
+            rows += '<tr><td colspan="5" class="lay-note">&#8987; layover in ' +
+              esc(cityName(l.from.code)) + " &mdash; " + fmtDur(lay) + "</td></tr>";
+          }
+          var e = legElapsed(l);
+          if (!e.tzKnown) anyTzUnknown = true;
+          // subtitle: airline name · booked class (booked format) or aircraft (availability)
+          var sub = [];
+          if (airlineName(l.airline)) sub.push(esc(airlineName(l.airline)));
+          if (l.cls) sub.push("class " + esc(l.cls));
+          else if (l.equip) sub.push(esc(equipName(l.equip)));
+          rows += "<tr>" +
+            "<td class='strong'>" + esc(l.airline + " " + l.fltNo) +
+            (sub.length ? "<br><small style='color:var(--ink-3)'>" + sub.join(" &middot; ") + "</small>" : "") + "</td>" +
+            "<td class='mono'>" + esc(fmtDate(l.dep)) + "</td>" +
+            "<td>" + airportHtml(l.from) + " &rarr; " + airportHtml(l.to) + "</td>" +
+            "<td class='mono'>" + pad2(l.dep.getHours()) + ":" + pad2(l.dep.getMinutes()) + " &rarr; " +
+            pad2(l.arr.getHours()) + ":" + pad2(l.arr.getMinutes()) + (l.plus ? " <b>+" + l.plus + "d</b>" : "") + "</td>" +
+            "<td class='mono strong'>" + fmtDur(e.mins) + (e.tzKnown ? "" : '<span class="tz-star">*</span>') + "</td>" +
+            "</tr>";
+        });
+        var tot = dirElapsed(segs);
+        if (!tot.tzKnown) anyTzUnknown = true;
+        html += '<div style="margin:14px 0 6px"><span class="dirtag ' + cls + '">' + label + "</span></div>" +
+          '<table class="cmp conv"><thead><tr><th>Flight</th><th>Date</th><th>Route</th><th>Times</th><th>Duration</th></tr></thead>' +
+          "<tbody>" + rows + "</tbody></table>" +
+          '<div class="dir-total">Total ' + label.toLowerCase() + " travel time (incl. layovers): <b>" +
+          fmtDur(tot.mins) + (tot.tzKnown ? "" : '<span class="tz-star">*</span>') + "</b></div>";
+      });
+      document.getElementById("itin").innerHTML = html;
+      document.getElementById("tzNote").style.display = anyTzUnknown ? "" : "none";
+      itinCard.style.display = "";
+
+      /* ---- Creator form values ---- */
+      var fhtml = "";
+      if (hasOpt) {
+        fhtml += '<div class="foot-note" style="margin:2px 0 4px">These are <b>alternative routings</b> &mdash; ' +
+          "enter ONE option per vendor quotation (all its rows go into Travel Ticket Options).</div>";
+      }
+      groups.forEach(function (g) {
+        var label = g.label, cls = g.cls, segs = g.segs;
+        var subform = g.isOption ? "Travel Ticket Options (one option per quotation)"
+          : (label === "RETURN" ? "Return subform (SubForm2)" : "Travel Ticket Options");
+        var rows = segs.map(function (l) {
+          var e = legElapsed(l);
+          return "<tr>" +
+            "<td>" + copyable(cityLabel(l.from.code)) + "</td>" +
+            "<td>" + copyable(cityLabel(l.to.code)) + "</td>" +
+            "<td>" + copyable(l.airline + l.fltNo) + "</td>" +
+            "<td>" + copyable(fmtDateTime(l.dep)) + "</td>" +
+            "<td>" + copyable(fmtDateTime(l.arr)) + "</td>" +
+            "<td>" + copyable(creatorDur(e.mins)) + "</td>" +
+            "</tr>";
+        }).join("");
+        fhtml += '<div style="margin:14px 0 6px"><span class="dirtag ' + cls + '">' + label + "</span> " +
+          '<small style="color:var(--ink-3);font-weight:700"> &rarr; ' + esc(subform) + "</small></div>" +
+          '<table class="cmp conv"><thead><tr><th>From</th><th>At</th><th>Flight Number</th>' +
+          "<th>Departure Date</th><th>Arrival Date Time</th><th>Journey Time</th></tr></thead>" +
+          "<tbody>" + rows + "</tbody></table>";
+      });
+      document.getElementById("formOut").innerHTML = fhtml;
+      formCard.style.display = "";
+    }
+
+    /* ---- click-to-copy ---- */
+    document.addEventListener("click", function (ev) {
+      var el = ev.target.closest(".copyable");
+      if (!el) return;
+      var text = el.getAttribute("data-copy");
+      function done() {
+        var tip = document.getElementById("copiedTip");
+        tip.style.left = (ev.clientX + 12) + "px";
+        tip.style.top = (ev.clientY - 24) + "px";
+        tip.classList.add("show");
+        setTimeout(function () { tip.classList.remove("show"); }, 800);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, done);
+      } else {
+        var ta = document.createElement("textarea");
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        try { document.execCommand("copy"); } catch (e) { }
+        document.body.removeChild(ta); done();
+      }
+    });
+
+    document.getElementById("btnConvert").addEventListener("click", convert);
+    document.getElementById("inp").addEventListener("input", convert);
+    document.getElementById("year").addEventListener("input", convert);
+    document.getElementById("tdate").addEventListener("input", convert);
+    document.getElementById("year").value = new Date().getFullYear();
+    (function () { // default Travel date = today (used by availability lines)
+      var n = new Date();
+      document.getElementById("tdate").value = n.getFullYear() + "-" + pad2(n.getMonth() + 1) + "-" + pad2(n.getDate());
+    })();
+    convert(); // run on the sample straight away
+  </script>
+</body>
+
+</html>

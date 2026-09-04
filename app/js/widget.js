@@ -874,9 +874,10 @@ function showAlert(opts) {
                           (Open/Submitted) -> forwards to Finance, others Open.
    - Finance & Accounts : approve an Open / "Approval Pending by Finance Team" quote.
        * fare <= $1000 -> Approved (final), others Rejected.
-       * fare  > $1000 -> "Approval Pending by Director", others Rejected.
-   - Director (from Department_Master) : approve an "Approval Pending by Director"
-                          quote -> Approved (final).
+       * fare  > $1000 -> "Approval Pending by Director", the other quotes STAY OPEN
+                          until the Director decides (finance is then locked out).
+   - Director : once a quote sits at "Approval Pending by Director", approve THAT
+                quote OR any still-Open one -> Approved (final), all others Rejected.
    - Nobody once the request already has an Approved quote.
 ===================================================================== */
 
@@ -916,15 +917,23 @@ function requestActedOn(requestId) {
 // the full dashboard but no Approve/Reject actions.
 var VIEW_ONLY = !!(typeof window !== "undefined" && window.VIEW_ONLY);
 
+// is any quote of this request waiting on the Director?
+function groupHasDirectorPending(requestId) {
+  return groupOf(requestId).some(function (q) { return isDirectorPending(q.status); });
+}
+
 // Should this row show an Approve button for the current user?
 function canApprove(q) {
   if (VIEW_ONLY) return false;                        // view-only page: no actions
   if (groupHasApproved(q.requestId)) return false;   // request already decided
   var t = (q.status || "").toLowerCase();
-  // Director finalises a > $1000 quote finance forwarded to them
-  if (isDirectorUser && isDirectorPending(q.status)) return true;
-  // Finance approves an Open or finance-pending quote (NOT a director-pending one)
-  if (isFinanceUser && (t === "open" || isFinancePending(q.status))) return true;
+  var directorStage = groupHasDirectorPending(q.requestId);
+  // Director acts once finance forwarded a > $1000 quote: they may approve the
+  // forwarded quote OR any quote still Open (those stay Open until they decide)
+  if (isDirectorUser && (isDirectorPending(q.status) || (t === "open" && directorStage))) return true;
+  // Finance approves an Open or finance-pending quote — but once a quote sits with
+  // the Director, the decision is the Director's alone
+  if (isFinanceUser && !directorStage && (t === "open" || isFinancePending(q.status))) return true;
   // Travel desk (neither finance nor director): only while the request is still fresh
   if (!isFinanceUser && !isDirectorUser) return isFresh(q.status) && !requestActedOn(q.requestId);
   return false;
@@ -987,24 +996,24 @@ function approveQuote(id) {
 
   // Work out this user's action from role + status + price.
   var dialog, updates;
-  if (isDirectorUser && isDirectorPending(q.status)) {
-    // Director finalises a > $1000 quote
+  if (isDirectorUser && (isDirectorPending(q.status) || groupHasDirectorPending(q.requestId))) {
+    // Director's final decision — the forwarded quote or any still-Open alternative
     dialog = {
       title: "Approve as Director?",
-      body: "Approve " + q.vendor + " at " + money + " for " + q.requestId + ".\n\nThis quotation is over " +
-        CURRENCY.format(DIRECTOR_THRESHOLD) + " and you are giving the final Director approval.",
+      body: "Approve " + q.vendor + " at " + money + " for " + q.requestId + ".\n\nThis is the final Director approval — all other quotations will be marked Rejected.",
       confirmText: "Approve"
     };
     updates = [{ id: q.id, status: "Approved" }].concat(rejectOthers);
   } else if (isFinanceUser && q.total > DIRECTOR_THRESHOLD) {
-    // Finance approves, but > $1000 -> needs Director sign-off next
+    // Finance approves, but > $1000 -> needs Director sign-off next; the other quotes
+    // stay Open so the Director can still pick one of them instead
     dialog = {
       title: "Send for Director approval?",
       body: "Approve " + q.vendor + " at " + money + ".\n\nThis quotation is over " + CURRENCY.format(DIRECTOR_THRESHOLD) +
-        ", so it needs Director approval (Approval Pending by Director). All other quotations for " + q.requestId + " will be Rejected.",
+        ", so it needs Director approval (Approval Pending by Director). The other quotations for " + q.requestId + " will stay Open until the Director decides.",
       confirmText: "Send to Director"
     };
-    updates = [{ id: q.id, status: "Approval Pending by Director" }].concat(rejectOthers);
+    updates = [{ id: q.id, status: "Approval Pending by Director" }].concat(openOthers);
   } else if (isFinanceUser) {
     // Finance final approval (<= $1000)
     dialog = {
