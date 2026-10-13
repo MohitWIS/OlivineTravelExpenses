@@ -641,6 +641,7 @@ function requestSummaries() {
     return {
       id: id,
       first: visible[0] || g[0],
+      quotes: visible,
       count: visible.length,
       matchCount: visible.length,
       openCount: visible.filter(function (q) { return isFresh(q.status); }).length,
@@ -676,24 +677,63 @@ function buildRequestCards() {
   var ids = summaries.map(function (s) { return s.id; });
   if (ids.indexOf(selectedRequest) < 0) selectedRequest = ids[0];
 
-  var badgeWord = st ? statusWord(st) : "open";
   el.innerHTML = summaries.map(function (s) {
-    var src = s.first.source.city || "—";
-    var dst = s.first.destination.city || "—";
-    var badgeCount = st ? s.matchCount : s.openCount;
+    var f = s.first;
+    var unlinked = s.id === "(no travel request)";
+    // chip: with a status filter → "2 approved"; otherwise the request's overall state
+    var chip = st
+      ? { text: s.matchCount + " " + statusWord(st), cls: isFresh(st) ? "open" : statusClass(st).replace("s-", "") }
+      : requestState(s.quotes);
     // both dates for a round trip (departure → return); just the one for a one-way
-    var dateTxt = esc(s.first.travelDate || "—") +
-      (s.first.returnDate ? ' <span class="rc-arrow">&rarr;</span> ' + esc(s.first.returnDate) : "");
-    return '<button type="button" class="req-card' + (s.id === selectedRequest ? " active" : "") + '" data-req="' + esc(s.id) + '">' +
-      '<div class="rc-top"><span class="rc-id">' + esc(s.id) + '</span>' +
-      '<span class="rc-open">' + badgeCount + ' ' + badgeWord + '</span></div>' +
+    var dateTxt = f.travelDate
+      ? esc(f.travelDate) + (f.returnDate ? ' <span class="rc-arrow">&rarr;</span> ' + esc(f.returnDate) : "")
+      : "";
+    var meta = (f.travelType || dateTxt)
+      ? '<div class="rc-meta"><svg viewBox="0 0 24 24"><path d="M7 2h2v2h6V2h2v2h3v18H4V4h3V2zm-1 8v10h12V10H6z"/></svg>' +
+        (f.travelType ? "<span>" + esc(f.travelType) + "</span>" : "") +
+        (f.travelType && dateTxt ? "<span>&middot;</span>" : "") +
+        (dateTxt ? "<span>" + dateTxt + "</span>" : "") + "</div>"
+      : "";
+    return '<button type="button" class="req-card' + (s.id === selectedRequest ? " active" : "") + (unlinked ? " unlinked" : "") +
+      '" data-req="' + esc(s.id) + '">' +
+      '<div class="rc-top"><div class="rc-idwrap">' +
+      '<div class="rc-kicker">' + (unlinked ? "Unlinked quotes" : "Travel request") + "</div>" +
+      '<div class="rc-id">' + (unlinked ? "No request ID" : esc(s.id)) + "</div></div>" +
+      '<span class="rc-chip ' + chip.cls + '">' + chip.text + "</span></div>" +
+      '<div class="rc-routebox">' + cardRoute(f.source, f.destination) + "</div>" +
+      meta +
       paxLine(s.id) +
-      '<div class="rc-route">' + esc(src) + '<span class="rc-arrow">&rarr;</span>' + esc(dst) + '</div>' +
-      '<div class="rc-meta"><span class="rc-type">' + esc(s.first.travelType || "—") + '</span> &middot; ' + dateTxt + '</div>' +
       '<div class="rc-foot"><span class="rc-cnt">' + s.count + ' quote' + (s.count !== 1 ? "s" : "") + '</span>' +
       '<span class="rc-low"><small>Lowest</small>' + CURRENCY.format(s.lowest) + '</span></div>' +
       '</button>';
   }).join("");
+}
+
+// overall state of a request (from its visible quotes) → chip text + colour class.
+// Open quotes win; otherwise the furthest stage reached.
+function requestState(quotes) {
+  var sts = quotes.map(function (q) { return (q.status || "").toLowerCase(); });
+  var has = function (re) { return sts.some(function (s) { return re.test(s); }); };
+  var open = quotes.filter(function (q) { return isFresh(q.status); }).length;
+  if (open) return { text: open + " open", cls: "open" };
+  if (has(/pend|wait|review/)) return { text: "Pending", cls: "warn" };
+  if (has(/ticket/)) return { text: "Ticket issued", cls: "good" };
+  if (has(/approv|accept|confirm/)) return { text: "Approved", cls: "good" };
+  if (has(/reject|declin|cancel/)) return { text: "Closed", cls: "bad" };
+  return { text: quotes.length + " quote" + (quotes.length !== 1 ? "s" : ""), cls: "" };
+}
+
+// route line on a request card: airport codes joined by a dashed path + plane,
+// with the city names under it; falls back to the city names when no codes are known
+function cardRoute(from, to) {
+  var fc = airportCode(from), tc = airportCode(to);
+  var fn = placeName(from && from.city) || "—", tn = placeName(to && to.city) || "—";
+  var path = '<span class="rc-path"><i></i><svg viewBox="0 0 24 24"><path d="' + PLANE_PATH + '"/></svg><i></i></span>';
+  if (fc || tc) {
+    return '<div class="rc-codes"><b>' + esc(fc || fn) + "</b>" + path + "<b>" + esc(tc || tn) + "</b></div>" +
+      '<div class="rc-cities">' + esc(fn) + " &rarr; " + esc(tn) + "</div>";
+  }
+  return '<div class="rc-codes txt"><b>' + esc(fn) + "</b>" + path + "<b>" + esc(tn) + "</b></div>";
 }
 
 // a passenger's age as a number (null if unknown)
@@ -717,15 +757,12 @@ function paxLine(requestId) {
     return '<div class="pax' + (inf ? " is-infant" : "") + '">' +
       '<span class="pax-av">' + esc(initial) + "</span>" +
       '<span class="pax-name">' + esc(name) + "</span>" +
-      (p.age ? '<span class="pax-age">' + esc(p.age) + " yrs</span>" : "") +
-      (inf ? '<span class="pax-infant">👶 Infant</span>' : "") +
+      (inf ? '<span class="pax-infant">👶 Infant</span>'
+           : (p.age ? '<span class="pax-age">' + esc(p.age) + " yrs</span>" : "")) +
       "</div>";
   }).join("");
   return '<div class="rc-pax">' +
-    '<div class="pax-hd">' +
-    '<svg viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4 0-8 2-8 5v1h16v-1c0-3-4-5-8-5z"/></svg>' +
-    "Passenger" + (pax.length > 1 ? "s" : "") +
-    '<span class="pax-ct">' + pax.length + "</span></div>" +
+    '<div class="pax-hd">' + pax.length + " passenger" + (pax.length > 1 ? "s" : "") + "</div>" +
     rows + "</div>";
 }
 
@@ -1107,15 +1144,28 @@ function renderKpis(quotes, best) {
   var avg = totals.reduce(function (a, b) { return a + b; }, 0) / totals.length;
 
   el.innerHTML =
-    kpi("Vendors quoting", String(quotes.length), esc(best.vendor) + " is lowest", "accent") +
-    kpi("Lowest total", CURRENCY.format(lo), "by " + esc(best.vendor), "best") +
-    kpi("Average quote", CURRENCY.format(avg), "across all quotations", "") +
-    kpi("Potential saving", CURRENCY.format(hi - lo), "<b>lowest vs highest</b> quote", "accent");
+    kpi("Vendors quoting", String(quotes.length), esc(best.vendor) + " is lowest", "accent", KPI_ICONS.vendors) +
+    kpi("Lowest total", CURRENCY.format(lo), "by " + esc(best.vendor), "best", KPI_ICONS.lowest) +
+    kpi("Average quote", CURRENCY.format(avg), "across all quotations", "", KPI_ICONS.average) +
+    kpi("Potential saving", CURRENCY.format(hi - lo), "<b>lowest vs highest</b> quote", "saving", KPI_ICONS.saving);
 
-  function kpi(label, value, note, cls) {
-    return '<div class="kpi ' + cls + '"><div class="k-label">' + label + '</div>' +
+  function kpi(label, value, note, cls, icon) {
+    return '<div class="kpi ' + cls + '"><span class="k-icon">' + icon + '</span><div class="k-label">' + label + '</div>' +
       '<div class="k-value">' + value + '</div><div class="k-note">' + note + "</div></div>";
   }
+}
+
+// icons for the KPI tiles (24px viewBox glyphs)
+var KPI_ICONS = {
+  vendors: '<svg viewBox="0 0 24 24"><path d="M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 2c-2.7 0-6 1.3-6 4v2h8v-2c0-1.2.5-2.3 1.4-3.2A9 9 0 0 0 8 13zm8 0c-2.7 0-6 1.3-6 4v2h12v-2c0-2.7-3.3-4-6-4z"/></svg>',
+  lowest: '<svg viewBox="0 0 24 24"><path d="M21.4 11.6l-9-9A2 2 0 0 0 11 2H4a2 2 0 0 0-2 2v7c0 .5.2 1 .6 1.4l9 9a2 2 0 0 0 2.8 0l7-7a2 2 0 0 0 0-2.8zM6.5 8A1.5 1.5 0 1 1 8 6.5 1.5 1.5 0 0 1 6.5 8z"/></svg>',
+  average: '<svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8v5h2V4h-8v2h5l-7 7-4-4-7 7z"/></svg>',
+  saving: '<svg viewBox="0 0 24 24"><path d="M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8L12 2zm7 11l.9 2.6 2.6.9-2.6.9L19 20l-.9-2.6-2.6-.9 2.6-.9L19 13zM5 14l.9 2.6 2.6.9-2.6.9L5 21l-.9-2.6L1.5 18l2.6-.9L5 14z"/></svg>'
+};
+
+// vendor avatar: first letter in a small rounded square
+function avatar(name) {
+  return '<span class="v-av">' + esc((val(name).trim().charAt(0) || "?").toUpperCase()) + "</span>";
 }
 
 /* --- horizontal bar chart: one bar per vendor, best in amber --- */
@@ -1127,7 +1177,7 @@ function renderChart(quotes, best) {
   el.innerHTML = quotes.map(function (q, i) {
     var isBest = best && q.id === best.id;
     return '<div class="crow' + (isBest ? " is-best" : "") + '" data-i="' + i + '">' +
-      '<div class="vname">' + (isBest ? '<span class="best-tag">BEST</span>' : "") + esc(q.vendor) + "</div>" +
+      '<div class="vname">' + (isBest ? '<span class="best-tag">BEST</span>' : "") + avatar(q.vendor) + '<span class="vn">' + esc(q.vendor) + "</span></div>" +
       '<div class="track"><div class="bar" data-w="' + (q.total / max * 100).toFixed(1) + '"></div></div>' +
       '<div class="fare">' + CURRENCY.format(q.total) +
       "<small>" + esc(q.travelType || (q.legs.length + " flight" + (q.legs.length !== 1 ? "s" : ""))) + "</small></div></div>";
@@ -1159,25 +1209,44 @@ function renderChart(quotes, best) {
   function trow(k, v) { return '<div class="t-row"><span>' + k + "</span><span>" + v + "</span></div>"; }
 }
 
+var PLANE_PATH = "M21.5 15.5v-2l-8.5-5V3.25a1.5 1.5 0 0 0-3 0V8.5l-8.5 5v2l8.5-2.5v5.25L7.5 20v1.5l4.5-1 4.5 1V20L14 18.25V13l7.5 2.5z";
+
+// the place name without its airport code: "Harare (HRE)" -> "Harare", "Delhi - DEL" -> "Delhi"
+function placeName(s) {
+  s = val(s).replace(/\s*\([A-Za-z]{3}\)\s*$/, "");
+  return cityOnly(s);
+}
+
+// airport block: big IATA code with the city under it (or just the city when no code)
+function portBlock(place) {
+  var code = airportCode(place);
+  var name = placeName(place && place.city);
+  if (name.toUpperCase() === code) name = "";
+  var h = code
+    ? '<div class="pcode">' + esc(code) + "</div>" + (name ? '<div class="pcity">' + esc(name) + "</div>" : "")
+    : '<div class="pcode txt">' + esc(name || "—") + "</div>";
+  if (place && place.country) h += '<div class="country">' + esc(place.country) + "</div>";
+  return h;
+}
+
 // one flight segment row (from -> at, airline, flight, timing, fare)
 function legRow(l, airline, badge, cls) {
   return '<div class="leg ' + cls + '">' +
-    '<div class="port"><div class="city">' + esc(l.from.city || "—") + '</div>' +
-    '<div class="country">' + esc(l.from.country) + '</div>' +
+    '<div class="port">' + portBlock(l.from) +
     '<div class="dt">' + esc(l.dep || "—") + "</div></div>" +
 
     '<div class="conn">' +
     '<span class="dirtag ' + cls + '">' + badge + "</span>" +
     '<div class="airline">' + esc(airline || "—") + '</div>' +
-    '<div class="fno">' + esc(l.flightNo) + '</div>' +
+    (l.flightNo ? '<span class="fno">' + esc(l.flightNo) + "</span>" : "") +
     '<div class="path"><span class="pt"></span><span class="ln"></span>' +
-    '<svg viewBox="0 0 24 24"><path d="M21.5 15.5v-2l-8.5-5V3.25a1.5 1.5 0 0 0-3 0V8.5l-8.5 5v2l8.5-2.5v5.25L7.5 20v1.5l4.5-1 4.5 1V20L14 18.25V13l7.5 2.5z"/></svg>' +
+    '<svg viewBox="0 0 24 24"><path d="' + PLANE_PATH + '"/></svg>' +
     '<span class="ln"></span><span class="pt"></span></div>' +
     (l.journey ? '<span class="dur">' + esc(l.journey) + "</span>" : "") +
     "</div>" +
 
-    '<div class="port to"><div class="city">' + esc(l.at.city || "—") + '</div>' +
-    '<div class="country">' + esc(l.at.country) + '</div>' +
+    '<div class="port to">' + portBlock(l.at) +
+    (l.arr ? '<div class="dt">' + esc(l.arr) + "</div>" : "") +
     "</div>" +
     "</div>";
 }
@@ -1212,6 +1281,7 @@ function renderFlow(quotes, best) {
 
     return '<div class="quote-block' + (isBest ? " is-best" : "") + '">' +
       '<div class="qhead">' +
+      avatar(q.vendor) +
       '<span class="qvendor">' + esc(q.vendor) + "</span>" +
       (q.quotationId ? '<span class="qmail">' + esc(q.quotationId) + "</span>" : "") +
       (q.email ? '<span class="qmail">' + esc(q.email) + "</span>" : "") +
@@ -1270,6 +1340,41 @@ function twoLineDT(s) {
   return m ? esc(m[1]) + "<br>" + esc(m[2]) : esc(s);
 }
 
+// Departure cell: the time large, the date small underneath
+function depCell(s) {
+  s = val(s);
+  var m = s.match(/^(.*?)\s+(\d{1,2}:\d{2}.*)$/);
+  return m
+    ? '<div class="dep-time">' + esc(m[2]) + '</div><div class="dep-date">' + esc(m[1]) + "</div>"
+    : '<div class="dep-time">' + esc(s || "—") + "</div>";
+}
+
+// Route cell: "HRE ✈ LHR" in airport codes with the city names (and any via stops) under it
+function routeCell(from, to, via) {
+  var fc = airportCode(from), tc = airportCode(to);
+  var fn = placeName(from && from.city), tn = placeName(to && to.city);
+  var viaTag = (via && via.length)
+    ? ' <span class="via-tag">via ' + esc(via.map(placeName).join(", ")) + "</span>" : "";
+  var top = '<div class="rt"><b>' + esc(fc || fn || "—") + "</b>" +
+    '<svg class="rt-plane" viewBox="0 0 24 24"><path d="' + PLANE_PATH + '"/></svg>' +
+    "<b>" + esc(tc || tn || "—") + "</b></div>";
+  var sub = (fc || tc)
+    ? '<div class="rt-sub">' + esc(fn || "—") + " &rarr; " + esc(tn || "—") + viaTag + "</div>"
+    : (viaTag ? '<div class="rt-sub">' + viaTag + "</div>" : "");
+  return top + sub;
+}
+
+// flight numbers of a direction as mono tags
+function fnTags(segs) {
+  return segs.map(function (s) { return s.flightNo ? '<span class="fn-tag">' + esc(s.flightNo) + "</span>" : ""; })
+    .join("") || "—";
+}
+
+// Layover cell: the computed layover as a pill, "—" when there is none / a single flight row
+function layPill(mins, segCount) {
+  return (segCount > 1 && mins) ? '<span class="lay-pill">' + fmtDur(mins) + "</span>" : "—";
+}
+
 // itinerary identity: same airline + same flight numbers = the same flight,
 // which one or more vendors may have quoted (each vendor becomes a column)
 function itineraryKey(q) {
@@ -1282,12 +1387,13 @@ function renderTable(quotes, best, infant) {
   var head = document.getElementById("tblHead");
   var body = document.getElementById("tblBody");
   var recNote = document.getElementById("recNote");
-  var FIXED = 7; // Airline | Flight No | Departure | From | To | Travel Time | Layover
+  var FIXED = 6; // Airline | Flight No | Departure | Route | Travel Time | Layover
 
   if (!quotes.length) {
     head.innerHTML = "";
     body.innerHTML = '<tr><td colspan="' + (FIXED + 1) + '" style="text-align:center;color:var(--ink-3)">No ticket options to display.</td></tr>';
     if (recNote) recNote.style.display = "none";
+    renderCmpCards([], [], null, null);
     return;
   }
 
@@ -1344,23 +1450,24 @@ function renderTable(quotes, best, infant) {
   // Fixed flight columns are kept compact (they wrap) so the vendor columns stay
   // roomy — the vendor columns are NOT squeezed to make room.
   var fixedCols = [
-    ["Airline", 9], ["Flight No", 8], ["Departure", 9],
-    ["From", 11], ["To", 11], ["Travel Time", 6], ["Layover", 5]
+    ["Airline", 11], ["Flight No", 8], ["Departure", 9],
+    ["Route", 16], ["Travel Time", 7], ["Layover", 8]
   ];
   var fixedTotal = fixedCols.reduce(function (t, c) { return t + c[1]; }, 0); // 59
   var vw = (100 - fixedTotal) / vendors.length; // each vendor column's %
   head.innerHTML = "<tr>" +
     fixedCols.map(function (c) { return '<th style="width:' + c[1] + '%">' + c[0] + "</th>"; }).join("") +
-    vendors.map(function (v) { return '<th class="vhead" style="width:' + vw.toFixed(3) + '%">' + esc(v) + "</th>"; }).join("") +
+    vendors.map(function (v) { return '<th class="vhead" style="width:' + vw.toFixed(3) + '%">' + avatar(v) + esc(v) + "</th>"; }).join("") +
     "</tr>";
 
   // body: one row per DIRECTION (outbound / return) so per-direction Travel Time is
   // shown on its own — not summed. The vendor fare (a round-trip total) spans the
   // itinerary's direction rows via rowspan.
-  body.innerHTML = flightRows.map(function (r) {
+  body.innerHTML = flightRows.map(function (r, ri) {
     var q = r.sample, min = rowMin(r);
     var dirs = directions(q);
     var span = Math.max(dirs.length, 1);
+    var band = ri % 2 ? " it-b" : ""; // alternate flights get a faint band
 
     // vendor cells — one per vendor, spanning all direction rows of this itinerary
     var vcells = vendors.map(function (v) {
@@ -1377,11 +1484,10 @@ function renderTable(quotes, best, infant) {
 
     // no ticket legs at all — single fallback row
     if (!dirs.length) {
-      return "<tr>" +
-        "<td class='strong'>" + esc(q.airline || "—") + "</td>" +
-        '<td class="cell-fn">—</td><td class="dur-cell">—</td>' +
-        "<td>" + wrapName(q.source.city || "—") + "</td>" +
-        "<td>" + wrapName(q.destination.city || "—") + "</td>" +
+      return '<tr class="it-first' + band + '">' +
+        "<td class='cell-air'><div class='air-name'>" + esc(q.airline || "—") + "</div></td>" +
+        '<td class="cell-fn">—</td><td class="cell-dep">—</td>' +
+        "<td class='cell-route'>" + routeCell(q.source, q.destination, []) + "</td>" +
         "<td class='dur-cell'>—</td><td class='dur-cell'>—</td>" + vcells + "</tr>";
     }
 
@@ -1391,27 +1497,74 @@ function renderTable(quotes, best, infant) {
       var s = dirSummary(d.segs);
       var isRet = d.dir === "ret";
       var badge = isRet ? "RETURN" : "OUTBOUND";
-      var nos = d.segs.map(function (seg) { return esc(seg.flightNo); }).filter(Boolean).join(" · ") || "—";
       var lay = dirLayoverMins(d.segs);      // layover computed from the flight times
       var dur = dirDurationMins(d.segs);     // timezone-corrected end-to-end travel time
       var cls = [];
+      if (di === 0) cls.push("it-first");              // first row of a flight: solid top rule
       if (di < dirs.length - 1) cls.push("dir-mid"); // dashed divider between the two directions
       if (isRec) cls.push("rec-row");
-      var rowCls = cls.length ? ' class="' + cls.join(" ") + '"' : "";
+      if (band) cls.push("it-b");
+      var rowCls = ' class="' + cls.join(" ") + '"';
       var recTag = (isRec && di === 0) ? '<span class="rec-tag">★ Recommended</span>' : "";
 
       var fixed =
-        "<td class='strong'>" + recTag + "<span class='dirtag " + (isRet ? "ret" : "out") + "'>" + badge + "</span><br>" + esc(q.airline || "—") + "</td>" +
-        '<td class="cell-fn">' + nos + "</td>" +
-        "<td class='dur-cell'>" + twoLineDT(d.segs[0].dep) + "</td>" +
-        "<td>" + wrapName(s.from.city || "—") + "</td>" +
-        "<td>" + wrapName(s.to.city || "—") + "</td>" +
-        "<td class='dur-cell strong'>" + fmtDur(dur) + "</td>" +
-        "<td class='dur-cell'>" + fmtDur(lay) + "</td>";
+        "<td class='cell-air'>" + recTag + "<span class='dirtag " + (isRet ? "ret" : "out") + "'>" + badge + "</span>" +
+        "<div class='air-name'>" + esc(q.airline || "—") + "</div></td>" +
+        '<td class="cell-fn">' + fnTags(d.segs) + "</td>" +
+        "<td class='cell-dep'>" + depCell(d.segs[0].dep) + "</td>" +
+        "<td class='cell-route'>" + routeCell(s.from, s.to, s.via) + "</td>" +
+        "<td class='dur-cell'><span class='dur-pill'>" + fmtDur(dur) + "</span></td>" +
+        "<td class='dur-cell'>" + layPill(lay, d.segs.length) + "</td>";
 
       return "<tr" + rowCls + ">" + fixed + (di === 0 ? vcells : "") + "</tr>";
     }).join("");
   }).join("");
+
+  renderCmpCards(flightRows, vendors, rowMin, recRow);
+}
+
+/* --- phone layout of the same comparison: one card per flight (CSS shows it < 720px) --- */
+function renderCmpCards(flightRows, vendors, rowMin, recRow) {
+  var box = document.getElementById("cmpCards");
+  if (!box) return;
+  box.innerHTML = flightRows.map(function (r) {
+    var q = r.sample, min = rowMin(r);
+    var dirs = directions(q);
+
+    var dirHtml = dirs.map(function (d) {
+      var s = dirSummary(d.segs);
+      var isRet = d.dir === "ret";
+      var nos = d.segs.map(function (seg) { return esc(seg.flightNo); }).filter(Boolean).join(" · ") || "—";
+      var lay = dirLayoverMins(d.segs);
+      var stops = d.segs.length > 1 ? "via " + esc(s.via.map(placeName).join(", ")) : "";
+      return '<div class="mc-dir">' +
+        '<div class="mc-dir-top"><span class="dirtag ' + (isRet ? "ret" : "out") + '">' + (isRet ? "RETURN" : "OUTBOUND") + "</span>" +
+        '<span class="mc-fn">' + nos + "</span></div>" +
+        '<div class="mc-route">' +
+          '<div class="mc-port">' + portBlock(s.from) + "<small>" + esc(d.segs[0].dep || "—") + "</small></div>" +
+          '<div class="mc-mid"><span class="mc-dur">' + fmtDur(dirDurationMins(d.segs)) + '</span><span class="mc-line"></span>' +
+            (stops ? '<span class="mc-stops">' + stops + (lay ? " · " + fmtDur(lay) + " layover" : "") + "</span>" : "") + "</div>" +
+          '<div class="mc-port to">' + portBlock(s.to) + "<small>" + esc(d.segs[d.segs.length - 1].arr || "") + "</small></div>" +
+        "</div></div>";
+    }).join("");
+
+    var fares = vendors.map(function (v) {
+      var vq = r.byVendor[v];
+      if (!vq) return "";
+      var isLow = vq.total === min;
+      return '<div class="mc-fare' + (isLow ? " low" : "") + '">' +
+        '<div class="mc-fare-l"><div class="mc-vendor">' + avatar(v) + " " + esc(v) + (isLow ? ' <span class="vbest-tag">Lowest</span>' : "") + "</div>" +
+        (vq.status ? '<span class="status-pill ' + statusClass(vq.status) + '">' + esc(vq.status) + "</span>" : "") + "</div>" +
+        '<div class="mc-fare-r"><div class="mc-amt">' + CURRENCY.format(vq.total) + "</div>" +
+        (canApprove(vq) ? '<button class="btn-approve' + (isLow ? " green" : "") + '" type="button" data-id="' + esc(vq.id) + '">Approve</button>' : "") +
+        "</div></div>";
+    }).join("");
+
+    return '<div class="mc' + (r === recRow ? " rec" : "") + '">' +
+      '<div class="mc-head"><div class="mc-air">' + esc(q.airline || "—") + "</div>" +
+      (r === recRow ? '<span class="rec-tag">★ Recommended</span>' : "") + "</div>" +
+      dirHtml + '<div class="mc-fares">' + fares + "</div></div>";
+  }).join("") || '<div class="req-empty">No ticket options to display.</div>';
 }
 
 /* =====================================================================
@@ -1436,10 +1589,13 @@ document.getElementById("reqCards").addEventListener("click", function (ev) {
   render();
 });
 
-// Approve buttons are re-rendered with the table, so listen on the tbody
-document.getElementById("tblBody").addEventListener("click", function (ev) {
-  var btn = ev.target.closest(".btn-approve");
-  if (btn && !btn.disabled) approveQuote(btn.getAttribute("data-id"));
+// Approve buttons are re-rendered with the table / phone cards, so listen on their containers
+["tblBody", "cmpCards"].forEach(function (id) {
+  var el = document.getElementById(id);
+  if (el) el.addEventListener("click", function (ev) {
+    var btn = ev.target.closest(".btn-approve");
+    if (btn && !btn.disabled) approveQuote(btn.getAttribute("data-id"));
+  });
 });
 
 // sort buttons above the comparison table (Lowest fare / Fastest)

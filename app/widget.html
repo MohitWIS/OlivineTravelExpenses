@@ -6,6 +6,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Vendor Quotation Comparison</title>
   <script src="https://js.zohostatic.com/creator/widgets/version/2.0/widgetsdk-min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/widget.css">
 </head>
 
@@ -13,6 +16,11 @@
 
   <!-- ============ HEADER ============ -->
   <header class="hero">
+    <svg class="hero-arc" viewBox="0 0 640 240" aria-hidden="true">
+      <path d="M-20 215 C 140 30, 420 10, 660 120" />
+      <circle cx="40" cy="178" r="4" />
+      <circle cx="590" cy="100" r="4" />
+    </svg>
     <div class="hero-row">
       <div class="hero-badge">
         <svg viewBox="0 0 24 24">
@@ -20,9 +28,10 @@
             d="M21.5 15.5v-2l-8.5-5V3.25a1.5 1.5 0 0 0-3 0V8.5l-8.5 5v2l8.5-2.5v5.25L7.5 20v1.5l4.5-1 4.5 1V20L14 18.25V13l7.5 2.5z" />
         </svg>
       </div>
-      <div>
+      <div class="hero-text">
+        <span class="hero-kicker">Air Travel Request Management</span>
         <h1>Vendor Quotation Comparisons</h1>
-        <p>Air Travel Request Management &mdash; compare vendor fares, routes &amp; timings side by side</p>
+        <p>Compare vendor fares, routes &amp; timings side by side &mdash; and approve in one click</p>
       </div>
       <div class="spacer"></div>
       <button class="btn-refresh" id="btnRefresh" type="button">
@@ -34,6 +43,7 @@
       </button>
     </div>
   </header>
+
 
   <main class="wrap">
 
@@ -62,7 +72,7 @@
       <!-- ============ TRAVEL REQUESTS ============ -->
       <section class="card">
         <div class="card-head">
-          <div class="card-title"><span class="dot"></span>Travel Requests</div>
+          <div class="card-title"><span class="ci"><svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 0-2 2v2.5a2.5 2.5 0 0 1 0 5V17a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2.5a2.5 2.5 0 0 1 0-5V7a2 2 0 0 0-2-2H4zm9 2.5h1.5v9H13v-9z"/></svg></span>Travel Requests</div>
           <div class="card-sub" id="reqSub">Requests awaiting action &mdash; showing only those with Open / Submitted
             quotations</div>
         </div>
@@ -78,7 +88,7 @@
       <!-- ============ FARE CHART ============ -->
       <section class="card">
         <div class="card-head">
-          <div class="card-title"><span class="dot"></span>Total Fare by Vendor</div>
+          <div class="card-title"><span class="ci"><svg viewBox="0 0 24 24"><path d="M4 20v-8h3.5v8H4zm6.25 0V4h3.5v16h-3.5zm6.25 0v-5H20v5h-3.5z"/></svg></span>Total Fare by Vendor</div>
           <div class="card-sub">Quoted total amount per vendor &mdash; sorted lowest first</div>
         </div>
         <div class="chart-rows" id="chart"></div>
@@ -92,7 +102,7 @@
       <section class="card">
         <div class="card-head cmp-head">
           <div>
-            <div class="card-title"><span class="dot"></span>Detailed Comparison</div>
+            <div class="card-title"><span class="ci"><svg viewBox="0 0 24 24"><path d="M3 4h18v4.5H3V4zm0 5.75h18v4.5H3v-4.5zM3 15.5h18V20H3v-4.5z"/></svg></span>Detailed Comparison</div>
             <div class="card-sub">One row per flight &mdash; vendor fares side by side, the cheapest highlighted</div>
           </div>
           <div class="sort-bar" id="sortBar">
@@ -102,6 +112,7 @@
           </div>
         </div>
         <div class="rec-note" id="recNote" style="display:none"></div>
+        <div class="cmp-cards" id="cmpCards"></div>
         <div class="tbl-scroll">
           <table class="cmp grid">
             <thead id="tblHead"></thead>
@@ -113,7 +124,7 @@
       <!-- ============ ROUTE FLOW ============ -->
       <section class="card">
         <div class="card-head">
-          <div class="card-title"><span class="dot"></span>Route &amp; Flight Flow</div>
+          <div class="card-title"><span class="ci"><svg viewBox="0 0 24 24"><path d="M21.5 15.5v-2l-8.5-5V3.25a1.5 1.5 0 0 0-3 0V8.5l-8.5 5v2l8.5-2.5v5.25L7.5 20v1.5l4.5-1 4.5 1V20L14 18.25V13l7.5 2.5z"/></svg></span>Route &amp; Flight Flow</div>
           <div class="card-sub">Journey per vendor &mdash; source &rarr; destination with airline &amp; flight options
           </div>
         </div>
