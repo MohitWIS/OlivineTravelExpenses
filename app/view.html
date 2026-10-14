@@ -17,9 +17,19 @@
   <!-- ============ HEADER ============ -->
   <header class="hero">
     <svg class="hero-arc" viewBox="0 0 640 240" aria-hidden="true">
-      <path d="M-20 215 C 140 30, 420 10, 660 120" />
+      <path id="heroRoute" d="M-20 215 C 140 30, 420 10, 660 120" />
+      <!-- contrail: a short dash that runs along the arc in step with the plane -->
+      <path class="hero-trail" d="M-20 215 C 140 30, 420 10, 660 120" pathLength="1"
+        stroke-dasharray="0.22 2" stroke-dashoffset="0.22">
+        <animate attributeName="stroke-dashoffset" from="0.22" to="-0.78" dur="9s" repeatCount="indefinite" />
+      </path>
       <circle cx="40" cy="178" r="4" />
       <circle cx="590" cy="100" r="4" />
+      <!-- plane flying the arc, nose following the curve -->
+      <g class="hero-plane">
+        <g transform="rotate(90) scale(1.6)"><path transform="translate(-12,-12)" d="M21.5 15.5v-2l-8.5-5V3.25a1.5 1.5 0 0 0-3 0V8.5l-8.5 5v2l8.5-2.5v5.25L7.5 20v1.5l4.5-1 4.5 1V20L14 18.25V13l7.5 2.5z" /></g>
+        <animateMotion dur="9s" repeatCount="indefinite" rotate="auto"><mpath href="#heroRoute" /></animateMotion>
+      </g>
     </svg>
     <div class="hero-row">
       <div class="hero-badge">
@@ -50,7 +60,7 @@
     <!-- Loading / error / empty state (hidden once data arrives) -->
     <div class="card" id="stateCard">
       <div class="loader" id="loader">
-        <div class="spin"></div>
+        <div class="orbit"><span class="orbit-globe"></span><span class="orbit-plane"><svg viewBox="0 0 24 24"><path d="M21.5 15.5v-2l-8.5-5V3.25a1.5 1.5 0 0 0-3 0V8.5l-8.5 5v2l8.5-2.5v5.25L7.5 20v1.5l4.5-1 4.5 1V20L14 18.25V13l7.5 2.5z"/></svg></span></div>
         <p>Loading vendor quotations&hellip;</p>
       </div>
     </div>

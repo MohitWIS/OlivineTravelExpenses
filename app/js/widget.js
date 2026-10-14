@@ -585,11 +585,15 @@ function finish() {
   document.getElementById("content").style.display = "block";
 }
 
+// loading animation: a plane orbiting a little globe (same markup as the static loader in the HTML)
+var ORBIT_HTML = '<div class="orbit"><span class="orbit-globe"></span><span class="orbit-plane">' +
+  '<svg viewBox="0 0 24 24"><path d="M21.5 15.5v-2l-8.5-5V3.25a1.5 1.5 0 0 0-3 0V8.5l-8.5 5v2l8.5-2.5v5.25L7.5 20v1.5l4.5-1 4.5 1V20L14 18.25V13l7.5 2.5z"/></svg></span></div>';
+
 function showLoader() {
   document.getElementById("content").style.display = "none";
   var sc = document.getElementById("stateCard");
   sc.style.display = "block";
-  sc.innerHTML = '<div class="loader"><div class="spin"></div><p>Loading vendor quotations&hellip;</p></div>';
+  sc.innerHTML = '<div class="loader">' + ORBIT_HTML + '<p>Loading vendor quotations&hellip;</p></div>';
 }
 
 function showEmpty(title, msg) {
@@ -1542,7 +1546,7 @@ function renderCmpCards(flightRows, vendors, rowMin, recRow) {
         '<span class="mc-fn">' + nos + "</span></div>" +
         '<div class="mc-route">' +
           '<div class="mc-port">' + portBlock(s.from) + "<small>" + esc(d.segs[0].dep || "—") + "</small></div>" +
-          '<div class="mc-mid"><span class="mc-dur">' + fmtDur(dirDurationMins(d.segs)) + '</span><span class="mc-line"></span>' +
+          '<div class="mc-mid"><span class="mc-dur">' + fmtDur(dirDurationMins(d.segs)) + '</span><span class="mc-line' + (isRet ? " ret" : "") + '"><svg viewBox="0 0 24 24"><path d="' + PLANE_PATH + '"/></svg></span>' +
             (stops ? '<span class="mc-stops">' + stops + (lay ? " · " + fmtDur(lay) + " layover" : "") + "</span>" : "") + "</div>" +
           '<div class="mc-port to">' + portBlock(s.to) + "<small>" + esc(d.segs[d.segs.length - 1].arr || "") + "</small></div>" +
         "</div></div>";
