@@ -437,16 +437,32 @@ function arrivalOf(l) {
 // layover we compute ourselves at each connection: next leg's departure minus this
 // leg's arrival, summed over a direction's segments (0 when it can't be worked out)
 function dirLayoverMins(segs) {
-  var total = 0;
+  return dirLayoverInfo(segs).mins;
+}
+
+// a connection longer than this is not a layover — it means the vendor's dates are wrong
+var LAYOVER_MAX_MINS = 24 * 60;
+
+// layover details: total minutes, plus `suspect` (the longest gap) when any single
+// connection exceeds LAYOVER_MAX_MINS — then the totals can't be trusted
+function dirLayoverInfo(segs) {
+  var total = 0, worst = 0;
   for (var i = 0; i < segs.length - 1; i++) {
     var nextDep = parseDateTime(segs[i + 1].dep);
     var arr = arrivalOf(segs[i]);
     if (!isNaN(nextDep) && !isNaN(arr)) {
       var gap = Math.round((nextDep - arr) / 60000);
       if (gap > 0) total += gap;
+      if (gap > worst) worst = gap;
     }
   }
-  return total;
+  return { mins: total, suspect: worst > LAYOVER_MAX_MINS ? worst : 0 };
+}
+
+// "34d 1h" for long gaps (used in the "check dates" hint)
+function fmtDays(mins) {
+  var d = Math.floor(mins / 1440), h = Math.round((mins % 1440) / 60);
+  return d + "d" + (h ? " " + h + "h" : "");
 }
 
 // total travel time of one direction — first take-off to final touch-down including
@@ -1303,21 +1319,6 @@ function renderFlow(quotes, best) {
 var tableSort = "lowest";
 var sortAutoReq = null; // request whose default sort we've already applied
 
-// compact per-direction summary line for the Journey cell
-function journeyLine(d) {
-  var s = dirSummary(d.segs);
-  var stops = d.segs.length - 1;
-  var stopTxt = stops === 0 ? "non-stop"
-    : stops + " stop" + (stops > 1 ? "s" : "") + (s.via.length ? " · via " + esc(s.via.join(", ")) : "");
-  var cls = d.dir === "ret" ? "ret" : "out";
-  return '<div class="jl">' +
-    '<span class="dirtag ' + cls + '">' + (d.dir === "ret" ? "RETURN" : "OUTBOUND") + "</span>" +
-    '<span class="jl-route">' + esc(s.from.city || "—") + " &rarr; " + esc(s.to.city || "—") + "</span>" +
-    '<span class="jl-meta">' + stopTxt + "</span>" +
-    '<span class="jl-times">' + esc(d.segs[0].dep || "—") + " &rarr; " + esc(d.segs[d.segs.length - 1].arr || "—") + "</span>" +
-    "</div>";
-}
-
 // total computed layover across a quote (minutes)
 function quoteLayover(q) {
   return directions(q).reduce(function (t, d) { return t + dirLayoverMins(d.segs); }, 0);
@@ -1344,13 +1345,48 @@ function twoLineDT(s) {
   return m ? esc(m[1]) + "<br>" + esc(m[2]) : esc(s);
 }
 
-// Departure cell: the time large, the date small underneath
-function depCell(s) {
+// Departure cell: the time large, the date small underneath (tag = optional extra HTML)
+function depCell(s, tag) {
   s = val(s);
   var m = s.match(/^(.*?)\s+(\d{1,2}:\d{2}.*)$/);
   return m
-    ? '<div class="dep-time">' + esc(m[2]) + '</div><div class="dep-date">' + esc(m[1]) + "</div>"
-    : '<div class="dep-time">' + esc(s || "—") + "</div>";
+    ? '<div class="dep-time">' + esc(m[2]) + (tag || "") + '</div><div class="dep-date">' + esc(m[1]) + "</div>"
+    : '<div class="dep-time">' + esc(s || "—") + (s ? tag || "" : "") + "</div>";
+}
+
+// epoch ms -> "10-Jul-2026 06:30" (same shape the vendors enter)
+function fmtDateTime(ms) {
+  var d = new Date(ms), p = function (n) { return (n < 10 ? "0" : "") + n; };
+  var mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()];
+  return p(d.getDate()) + "-" + mon + "-" + d.getFullYear() + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+
+// arrival at the end of a direction: the vendor's arrival on the last leg, else an
+// estimate (departure + journey time, moved onto the destination clock) — only when both
+// airports' time zones are known, so we never show a wrong local time. null = unknown.
+function dirArrival(segs) {
+  var last = segs[segs.length - 1];
+  if (val(last.arr)) return { text: val(last.arr), est: false };
+  var oF = placeOffset(last.from), oT = placeOffset(last.at);
+  if (oF === null || oT === null) return null;
+  var ms = arrivalOf(last);
+  return isNaN(ms) ? null : { text: fmtDateTime(ms), est: true };
+}
+
+// Arrival cell: like Departure, plus "+1" when it lands on a later day and "est." when computed
+function arrCell(segs) {
+  var a = dirArrival(segs);
+  if (!a) return '<div class="dep-time">—</div>';
+  var dep = parseDateTime(segs[0].dep), arr = parseDateTime(a.text), plus = "";
+  // no "+N days" when the dates are already flagged as wrong (it would just echo the typo)
+  if (!isNaN(dep) && !isNaN(arr) && !dirLayoverInfo(segs).suspect) {
+    var dd = new Date(dep), da = new Date(arr);
+    var days = Math.round((new Date(da.getFullYear(), da.getMonth(), da.getDate()) -
+      new Date(dd.getFullYear(), dd.getMonth(), dd.getDate())) / 86400000);
+    if (days > 0) plus = '<sup class="day-plus" title="Arrives ' + days + ' day' + (days > 1 ? "s" : "") + ' later">+' + days + "</sup>";
+  }
+  return depCell(a.text, plus) +
+    (a.est ? '<span class="est-tag" title="Not entered by the vendor — estimated from departure + journey time">est.</span>' : "");
 }
 
 // Route cell: "HRE ✈ LHR" in airport codes with the city names (and any via stops) under it
@@ -1374,9 +1410,18 @@ function fnTags(segs) {
     .join("") || "—";
 }
 
-// Layover cell: the computed layover as a pill, "—" when there is none / a single flight row
-function layPill(mins, segCount) {
-  return (segCount > 1 && mins) ? '<span class="lay-pill">' + fmtDur(mins) + "</span>" : "—";
+// Layover cell: the computed layover as a pill, "—" when there is none / a single flight row,
+// or a warning when a connection is longer than a day (the vendor's dates are wrong)
+function layPill(segs) {
+  if (segs.length <= 1) return "—";
+  var lay = dirLayoverInfo(segs);
+  if (lay.suspect) return checkDatesPill(lay.suspect);
+  return lay.mins ? '<span class="lay-pill">' + fmtDur(lay.mins) + "</span>" : "—";
+}
+
+function checkDatesPill(gapMins) {
+  return '<span class="lay-pill warn" title="The next flight departs ' + fmtDays(gapMins) +
+    ' after the previous one lands — please check the vendor\'s dates">⚠ Check dates</span>';
 }
 
 // itinerary identity: same airline + same flight numbers = the same flight,
@@ -1391,7 +1436,7 @@ function renderTable(quotes, best, infant) {
   var head = document.getElementById("tblHead");
   var body = document.getElementById("tblBody");
   var recNote = document.getElementById("recNote");
-  var FIXED = 6; // Airline | Flight No | Departure | Route | Travel Time | Layover
+  var FIXED = 7; // Airline | Flight No | Departure | Arrival | Route | Travel Time | Layover
 
   if (!quotes.length) {
     head.innerHTML = "";
@@ -1454,8 +1499,8 @@ function renderTable(quotes, best, infant) {
   // Fixed flight columns are kept compact (they wrap) so the vendor columns stay
   // roomy — the vendor columns are NOT squeezed to make room.
   var fixedCols = [
-    ["Airline", 11], ["Flight No", 8], ["Departure", 9],
-    ["Route", 16], ["Travel Time", 7], ["Layover", 8]
+    ["Airline", 10], ["Flight No", 7], ["Departure", 9], ["Arrival", 9],
+    ["Route", 14], ["Travel Time", 7], ["Layover", 7]
   ];
   var fixedTotal = fixedCols.reduce(function (t, c) { return t + c[1]; }, 0); // 59
   var vw = (100 - fixedTotal) / vendors.length; // each vendor column's %
@@ -1490,7 +1535,7 @@ function renderTable(quotes, best, infant) {
     if (!dirs.length) {
       return '<tr class="it-first' + band + '">' +
         "<td class='cell-air'><div class='air-name'>" + esc(q.airline || "—") + "</div></td>" +
-        '<td class="cell-fn">—</td><td class="cell-dep">—</td>' +
+        '<td class="cell-fn">—</td><td class="cell-dep">—</td><td class="cell-dep">—</td>' +
         "<td class='cell-route'>" + routeCell(q.source, q.destination, []) + "</td>" +
         "<td class='dur-cell'>—</td><td class='dur-cell'>—</td>" + vcells + "</tr>";
     }
@@ -1501,8 +1546,8 @@ function renderTable(quotes, best, infant) {
       var s = dirSummary(d.segs);
       var isRet = d.dir === "ret";
       var badge = isRet ? "RETURN" : "OUTBOUND";
-      var lay = dirLayoverMins(d.segs);      // layover computed from the flight times
-      var dur = dirDurationMins(d.segs);     // timezone-corrected end-to-end travel time
+      var suspect = dirLayoverInfo(d.segs).suspect;    // a "layover" over a day = wrong vendor dates
+      var dur = suspect ? 0 : dirDurationMins(d.segs); // timezone-corrected end-to-end travel time
       var cls = [];
       if (di === 0) cls.push("it-first");              // first row of a flight: solid top rule
       if (di < dirs.length - 1) cls.push("dir-mid"); // dashed divider between the two directions
@@ -1516,9 +1561,10 @@ function renderTable(quotes, best, infant) {
         "<div class='air-name'>" + esc(q.airline || "—") + "</div></td>" +
         '<td class="cell-fn">' + fnTags(d.segs) + "</td>" +
         "<td class='cell-dep'>" + depCell(d.segs[0].dep) + "</td>" +
+        "<td class='cell-dep'>" + arrCell(d.segs) + "</td>" +
         "<td class='cell-route'>" + routeCell(s.from, s.to, s.via) + "</td>" +
-        "<td class='dur-cell'><span class='dur-pill'>" + fmtDur(dur) + "</span></td>" +
-        "<td class='dur-cell'>" + layPill(lay, d.segs.length) + "</td>";
+        "<td class='dur-cell'>" + (dur ? "<span class='dur-pill'>" + fmtDur(dur) + "</span>" : "—") + "</td>" +
+        "<td class='dur-cell'>" + layPill(d.segs) + "</td>";
 
       return "<tr" + rowCls + ">" + fixed + (di === 0 ? vcells : "") + "</tr>";
     }).join("");
@@ -1539,16 +1585,18 @@ function renderCmpCards(flightRows, vendors, rowMin, recRow) {
       var s = dirSummary(d.segs);
       var isRet = d.dir === "ret";
       var nos = d.segs.map(function (seg) { return esc(seg.flightNo); }).filter(Boolean).join(" · ") || "—";
-      var lay = dirLayoverMins(d.segs);
+      var layInfo = dirLayoverInfo(d.segs), lay = layInfo.suspect ? 0 : layInfo.mins;
       var stops = d.segs.length > 1 ? "via " + esc(s.via.map(placeName).join(", ")) : "";
+      var arr = dirArrival(d.segs);
       return '<div class="mc-dir">' +
         '<div class="mc-dir-top"><span class="dirtag ' + (isRet ? "ret" : "out") + '">' + (isRet ? "RETURN" : "OUTBOUND") + "</span>" +
         '<span class="mc-fn">' + nos + "</span></div>" +
         '<div class="mc-route">' +
           '<div class="mc-port">' + portBlock(s.from) + "<small>" + esc(d.segs[0].dep || "—") + "</small></div>" +
-          '<div class="mc-mid"><span class="mc-dur">' + fmtDur(dirDurationMins(d.segs)) + '</span><span class="mc-line' + (isRet ? " ret" : "") + '"><svg viewBox="0 0 24 24"><path d="' + PLANE_PATH + '"/></svg></span>' +
-            (stops ? '<span class="mc-stops">' + stops + (lay ? " · " + fmtDur(lay) + " layover" : "") + "</span>" : "") + "</div>" +
-          '<div class="mc-port to">' + portBlock(s.to) + "<small>" + esc(d.segs[d.segs.length - 1].arr || "") + "</small></div>" +
+          '<div class="mc-mid"><span class="mc-dur">' + (layInfo.suspect ? "—" : fmtDur(dirDurationMins(d.segs))) + '</span><span class="mc-line' + (isRet ? " ret" : "") + '"><svg viewBox="0 0 24 24"><path d="' + PLANE_PATH + '"/></svg></span>' +
+            (stops ? '<span class="mc-stops">' + stops + (lay ? " · " + fmtDur(lay) + " layover" : "") + "</span>" : "") +
+            (layInfo.suspect ? checkDatesPill(layInfo.suspect) : "") + "</div>" +
+          '<div class="mc-port to">' + portBlock(s.to) + "<small>" + (arr ? esc(arr.text) + (arr.est ? ' <span class="est-tag">est.</span>' : "") : "") + "</small></div>" +
         "</div></div>";
     }).join("");
 
